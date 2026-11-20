@@ -2,6 +2,7 @@
 
 pub mod anim;
 pub mod fonts;
+pub mod hud;
 pub mod notefield;
 pub mod screens;
 pub mod theme;

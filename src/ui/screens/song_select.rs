@@ -400,6 +400,9 @@ impl SongSelectScreen {
             self.drag_base = Some(self.scroll.value);
             self.drag_travel = 0.0;
         }
+        if self.drag_base.is_some() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+        }
         if let Some(base) = self.drag_base {
             // drag_delta is the movement since the last frame.
             self.drag_travel += response.drag_delta().y;
@@ -921,7 +924,6 @@ fn initials(title: &str) -> String {
         .to_uppercase()
 }
 
-/// Shortens text to `max` characters with an ellipsis.
 /// Soft fade where the list meets the edge of its area (scroll edge effect).
 fn edge_fade(painter: &egui::Painter, rect: Rect, top: bool, palette: &theme::Palette) {
     const H: f32 = 28.0;
@@ -947,6 +949,7 @@ fn edge_fade(painter: &egui::Painter, rect: Rect, top: bool, palette: &theme::Pa
     widgets::vertical_gradient(painter, band, a, b);
 }
 
+/// Shortens text to `max` characters with an ellipsis.
 pub fn truncate(text: &str, max: usize) -> String {
     if text.chars().count() <= max {
         text.to_string()

@@ -491,6 +491,7 @@ impl eframe::App for FerrostepApp {
             ctx.request_repaint();
         }
 
+        pointer_cursor(&ctx);
         let drop_nav = self.handle_dropped_files(ui, &ctx);
         nav = nav
             .or_else(|| self.shared.pending_nav.take())
@@ -502,5 +503,24 @@ impl eframe::App for FerrostepApp {
         self.shared.toasts.show(&ctx, &self.shared.palette, now);
         self.log_fps(now, anim::since(now, Instant::now()));
         self.shared.autosave(now);
+    }
+}
+
+/// Shows a pointing hand over anything clickable (our custom widgets draw
+/// themselves, so egui would otherwise keep the arrow). Widgets that chose
+/// their own cursor (text fields, dragged lists) keep it.
+fn pointer_cursor(ctx: &egui::Context) {
+    if ctx.output(|o| o.cursor_icon) != egui::CursorIcon::Default {
+        return;
+    }
+    let clickable = ctx
+        .interaction_snapshot(|i| i.hovered.clone())
+        .into_iter()
+        .any(|id| {
+            ctx.read_response(id)
+                .is_some_and(|r| r.enabled() && r.sense.senses_click())
+        });
+    if clickable {
+        ctx.set_cursor_icon(egui::CursorIcon::PointingHand);
     }
 }

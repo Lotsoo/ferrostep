@@ -154,6 +154,15 @@ Di sesi Wayland, zona impor otomatis berganti teks "Klik untuk memilih file" (di
 - Perbaikan kecil: subjudul gameplay tidak lagi diawali "·" bila artis kosong.
 - Perlu dirasakan pengguna: kenyamanan scroll/drag di Song Select (nilai pegas mudah disetel di `anim.rs`).
 
+### Redesign gameplay + kursor (permintaan pengguna: "terlalu sepi dan jadul")
+
+- Modul baru `ui/hud.rs`: panggung (cahaya radial halus, partikel melayang, vignette), lajur kaca dengan garis ketukan yang ikut bergulir dan sorot cahaya kolom saat diinjak.
+- "Energi combo": combo ≥ 10 membuat panggung, cahaya, dan tepi lajur makin hidup; turun lembut saat combo putus.
+- HUD: pulau kaca info lagu (equalizer kecil, progres, sisa waktu) dan pulau skor (grade live, akurasi beranimasi, bar skor, jumlah tiap judgment). Life bar segmen lama diganti tabung vertikal di samping lajur dengan ikon hati; peringatan berdenyut pelan (1,5 Hz).
+- Judgment dengan cahaya lembut + kilau Marvelous; petunjuk CEPAT/LAMBAT (ms) untuk Great ke bawah; meter ketepatan 24 tekanan terakhir; combo emas selama full combo; perayaan + pujian setiap 50 combo; hitung mundur berbentuk cincin + "Mulai!".
+- `notefield::radial_light`: semua glow memakai mesh radial (tanpa cincin/banding).
+- Kursor tangan saat menyorot apa pun yang bisa diklik (global di `app.rs`), kursor "grabbing" saat menyeret daftar lagu.
+
 ## Berikutnya / masalah terbuka
 - Pengguna: uji di Windows 11 (zip dari CI atau `cargo build --release`), uji dance mat sungguhan
   (evtest → wizard → main), uji GNOME, uji FPS gameplay di monitor 120 Hz+.

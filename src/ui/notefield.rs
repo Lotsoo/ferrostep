@@ -3,7 +3,7 @@
 use std::f32::consts::{FRAC_PI_2, PI, TAU};
 
 use eframe::egui::{
-    Color32, Painter, Pos2, Rect, Shape, Stroke, Vec2, epaint::PathShape, pos2, vec2,
+    Color32, Mesh, Painter, Pos2, Rect, Shape, Stroke, Vec2, epaint::PathShape, pos2, vec2,
 };
 
 use super::theme::column_color;
@@ -68,17 +68,37 @@ pub fn draw_arrow(
     }
 }
 
-/// Soft glow made of layered translucent circles.
+/// Soft glow around a point (`strength` roughly 0..2).
 pub fn draw_glow(painter: &Painter, center: Pos2, radius: f32, color: Color32, strength: f32) {
-    for i in 0..5 {
-        let f = 1.0 - i as f32 / 5.0;
-        let alpha = (strength * 0.12 * (1.0 - f * 0.6)).clamp(0.0, 1.0);
-        painter.circle_filled(
-            center,
-            radius * (0.6 + f * 0.7),
-            color.gamma_multiply(alpha),
-        );
+    radial_light(painter, center, radius * 1.4, color, strength * 0.32);
+}
+
+/// Smooth radial light: one mesh with a Gaussian-like falloff, no visible rings.
+pub fn radial_light(painter: &Painter, center: Pos2, radius: f32, color: Color32, strength: f32) {
+    const SEGMENTS: u32 = 64;
+    // (radius fraction, intensity): close to a Gaussian falloff.
+    const RINGS: [(f32, f32); 4] = [(0.25, 0.8), (0.5, 0.45), (0.75, 0.15), (1.0, 0.0)];
+    let strength = strength.clamp(0.0, 1.0);
+    let mut mesh = Mesh::default();
+    mesh.colored_vertex(center, color.gamma_multiply(strength));
+    for (f, k) in RINGS {
+        for i in 0..SEGMENTS {
+            let a = i as f32 / SEGMENTS as f32 * TAU;
+            mesh.colored_vertex(
+                center + vec2(a.cos(), a.sin()) * radius * f,
+                color.gamma_multiply(strength * k),
+            );
+        }
     }
+    let ring = |r: u32, i: u32| 1 + r * SEGMENTS + i % SEGMENTS;
+    for i in 0..SEGMENTS {
+        mesh.add_triangle(0, ring(0, i), ring(0, i + 1));
+        for r in 0..RINGS.len() as u32 - 1 {
+            mesh.add_triangle(ring(r, i), ring(r + 1, i), ring(r + 1, i + 1));
+            mesh.add_triangle(ring(r, i), ring(r + 1, i + 1), ring(r, i + 1));
+        }
+    }
+    painter.add(Shape::mesh(mesh));
 }
 
 /// Geometry of the notefield for the current frame.

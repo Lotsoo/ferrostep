@@ -19,7 +19,7 @@ covered by `cargo test`. The UI is egui (immediate mode) on wgpu.
 | `gameplay` | `GameSession`: judgment, holds, mines, score, life | no |
 | `library` | scan `Songs/`, notify hot-reload, scores, test song | egui `Context` for repaints |
 | `config` | `Settings` (TOML), config/data folders | no |
-| `ui` | theme tokens, widgets, animation helpers, notefield drawing, screens | yes |
+| `ui` | theme tokens, widgets, animation helpers, notefield drawing, gameplay HUD/stage (`hud`), screens | yes |
 | `app` | screen state machine, shared state, transitions, drops, autosave | yes |
 
 ## Threads
@@ -88,3 +88,5 @@ Follows Apple's fluid-interface principles, adapted to egui:
   The import zone switches to "click to choose" on Wayland.
 - On Wayland the compositor paces frames to the monitor refresh rate even with
   VSync off.
+- Every clickable widget shows a pointing-hand cursor: `app::pointer_cursor` checks
+  egui's hovered widgets each frame, so custom-drawn widgets need no extra code.
