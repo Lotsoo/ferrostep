@@ -1,0 +1,5 @@
+/target
+
+# Personal / local files
+catatan.txt
+.claude/settings.local.json
