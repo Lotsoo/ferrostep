@@ -102,3 +102,20 @@ Di sesi Wayland, zona impor otomatis berganti teks "Klik untuk memilih file" (di
 - **Layar judul**: memutar preview lagu acak dari library (lagu nyata diutamakan), cincin berdenyut mengikuti
   beat lagu yang sebenarnya (via TimingMap), label "♪ judul — artis".
 - Perbaikan: `Music::fade_out` kini tidak terpotong saat objek di-drop (preview Song Select ikut lebih halus).
+
+### Fase 7 — Kualitas & kompatibilitas (selesai sebagian; sisanya butuh hardware pengguna)
+- VSync (`present_mode` AutoVsync/AutoNoVsync) dan backend grafis (Otomatis/Vulkan/DX12/OpenGL) dari Settings
+  diterapkan saat start. Variabel `WGPU_BACKEND` tetap dihormati pada mode Otomatis.
+- Bila jendela grafis gagal dibuka: dialog ramah (rfd) menjelaskan masalah driver dan menawarkan mode OpenGL
+  untuk start berikutnya (tidak bisa retry dalam proses yang sama: winit hanya boleh 1 event loop). Teruji.
+- Panic → `crash.log` di folder config (untuk dilampirkan saat lapor bug).
+- Audit `unwrap/expect`: hanya 1 `expect` invarian internal di luar test.
+- Pengukuran (build release, Intel Iris Xe, layar judul + musik):
+  - Wayland (KWin): ~60 FPS di semua backend walau VSync mati → dibatasi frame callback compositor/monitor 60 Hz.
+  - X11 (XWayland, VSync mati): 117–131 FPS.
+  - Waktu CPU bangun frame: 0,2–0,9 ms (anggaran 120 FPS = 8,3 ms) → ruang performa sangat besar.
+  - Log: `RUST_LOG=ferrostep=debug`.
+- Teruji jalan: Wayland (Auto/Vulkan/OpenGL) dan X11.
+
+**Belum bisa diuji di sini (butuh pengguna):** Windows 11 (DX12/Vulkan, joy.cpl), GNOME, dance mat sungguhan
+(latensi polling, debounce, hot-plug), ukur FPS gameplay di monitor 120 Hz+.

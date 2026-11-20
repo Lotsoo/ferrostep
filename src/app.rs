@@ -87,6 +87,11 @@ pub struct FerrostepApp {
     input: InputHub,
     screen: Screen,
     transition_start: Instant,
+    /// Frames counted since `fps_since` (logged at debug level).
+    fps_frames: u32,
+    fps_since: Instant,
+    /// CPU time spent building frames since `fps_since` (seconds).
+    fps_work: f32,
 }
 
 impl FerrostepApp {
@@ -146,6 +151,9 @@ impl FerrostepApp {
             input: InputHub::new(&cc.egui_ctx),
             screen: first_screen,
             transition_start: now,
+            fps_frames: 0,
+            fps_since: now,
+            fps_work: 0.0,
         }
     }
 
@@ -252,6 +260,27 @@ impl FerrostepApp {
             self.input.gamepads.save_profile(key, profile);
         }
         nav
+    }
+
+    /// Logs the frame rate every 2 s (`RUST_LOG=ferrostep=debug`).
+    ///
+    /// `work` is the CPU time this frame took to build. The FPS itself is often
+    /// capped by the compositor/monitor, so the CPU time shows the real headroom.
+    fn log_fps(&mut self, now: Instant, work: f32) {
+        self.fps_frames += 1;
+        self.fps_work += work;
+        let elapsed = anim::since(self.fps_since, now);
+        if elapsed >= 2.0 {
+            let avg_ms = self.fps_work / self.fps_frames as f32 * 1000.0;
+            log::debug!(
+                "fps: {:.0}, frame build {avg_ms:.2} ms (~{:.0} fps possible)",
+                self.fps_frames as f32 / elapsed,
+                1000.0 / avg_ms.max(0.01)
+            );
+            self.fps_frames = 0;
+            self.fps_since = now;
+            self.fps_work = 0.0;
+        }
     }
 
     /// Re-applies theme and UI scale after they change in Settings.
@@ -388,6 +417,7 @@ impl eframe::App for FerrostepApp {
             self.navigate(&ctx, nav);
         }
         self.shared.toasts.show(&ctx, &self.shared.palette, now);
+        self.log_fps(now, anim::since(now, Instant::now()));
         self.shared.autosave(now);
     }
 }
