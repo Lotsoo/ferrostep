@@ -5,6 +5,9 @@ use std::fmt::Write as _;
 
 use super::{Chart, NoteKind, Simfile};
 
+/// Radar values written for generated charts (StepMania recomputes them).
+pub const DEFAULT_RADAR: &str = "0.000,0.000,0.000,0.000,0.000";
+
 /// Finest grid: 192 rows per measure = 48 rows per beat.
 const ROWS_PER_MEASURE: i64 = 192;
 const ROWS_PER_BEAT: f64 = 48.0;

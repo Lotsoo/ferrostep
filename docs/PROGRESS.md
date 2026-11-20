@@ -26,3 +26,21 @@
 
 ### Masalah terbuka
 - Tidak ada.
+
+## 2026-11-21 — Sesi 1 (lanjutan): Fase 1 & 2
+
+### Fase 1 — Parser & timing (selesai)
+- `parser/`: pembaca `.sm`/`.ssc` (BOM, CRLF, komentar, tag tak dikenal, `;` hilang, measure 192 baris,
+  timing per-chart `.ssc`), writer `.sm` dengan resolusi measure terkecil, test round-trip.
+- `timing/`: `TimingMap` (BPM berubah, STOPS, offset; binary search) + `time_notes`.
+- Bug yang ditemukan test: tokenizer melewatkan `#` tag berikutnya bila `;` hilang (sudah diperbaiki).
+
+### Fase 2 — Gameplay inti (selesai, perlu uji manual)
+- `audio/clock.rs`: AudioClock (interpolasi monoton, batas 50 ms di depan posisi audio).
+- `audio/`: musik streaming (kira), volume master, klik metronom.
+- `gameplay/`: judgment (jendela StepMania, pengali judge), hold/roll/mine, combo, DP%, life, statistik offset.
+- `input/`: keyboard → ColumnEvent/MenuAction (siap untuk gamepad).
+- `ui/`: tema (design tokens), font Inter (OFL, ditanam di binary), notefield vektor, efek hit,
+  layar Title / Gameplay (lead-in, pause, auto-pause saat jendela tidak fokus) / Results (grafik timing,
+  saran kalibrasi satu klik), transisi fade+slide, toast, skor terbaik (`scores.json`).
+- `cargo run -- --make-test-song` membuat `Songs/_Test/Metronome/` (WAV sintetis + 3 chart).

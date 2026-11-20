@@ -3,5 +3,11 @@
 
 pub mod app;
 pub mod audio;
+pub mod audio_dsp;
+pub mod config;
+pub mod gameplay;
+pub mod input;
+pub mod library;
 pub mod parser;
 pub mod timing;
+pub mod ui;
