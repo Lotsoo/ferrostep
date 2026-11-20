@@ -1274,6 +1274,7 @@ dependencies = [
  "env_logger",
  "kira",
  "log",
+ "thiserror 2.0.21",
 ]
 
 [[package]]

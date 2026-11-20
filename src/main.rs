@@ -2,8 +2,7 @@
 //!
 //! Entry point: sets up logging and starts the eframe window.
 
-mod app;
-mod audio;
+use ferrostep::app;
 
 fn main() -> eframe::Result {
     // Logging: run with `RUST_LOG=debug cargo run` to see more output.

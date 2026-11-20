@@ -3,3 +3,6 @@
 # Personal / local files
 catatan.txt
 .claude/settings.local.json
+
+# Song library (user content, never committed)
+/Songs/
