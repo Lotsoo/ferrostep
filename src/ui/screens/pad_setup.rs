@@ -113,7 +113,8 @@ impl PadSetupScreen {
         let painter = ui.painter().clone();
         let card = Rect::from_center_size(rect.center(), vec2(720.0, 520.0));
         widgets::card(&painter, card, &palette);
-        painter.text(
+        widgets::text_tracked(
+            &painter,
             card.center_top() + vec2(0.0, 44.0),
             Align2::CENTER_CENTER,
             "Atur Dance Mat",
@@ -187,10 +188,11 @@ impl PadSetupScreen {
                 "Tombol ini untuk menu. Lewati kalau mat-mu tidak punya.".to_string(),
             )
         };
-        painter.text(
+        widgets::text_tracked(
+            &painter,
             card.center_top() + vec2(0.0, 300.0),
             Align2::CENTER_CENTER,
-            title,
+            &title,
             font_bold(theme::TEXT_L),
             palette.text,
         );

@@ -143,6 +143,17 @@ Di sesi Wayland, zona impor otomatis berganti teks "Klik untuk memilih file" (di
 - README untuk pengguna akhir (instal, main, panduan beli & pasang dance mat, masalah umum, build).
 - `docs/ARCHITECTURE.md`.
 
+### Redesign — prinsip desain Apple (permintaan pengguna, skill `apple-design`)
+
+- `anim::Spring`: pegas yang bisa disela (damping + response), plus `project` (proyeksi momentum) dan `rubberband` (tepi lentur), dengan test.
+- Transisi layar memakai pegas dan arah navigasi: layar lebih dalam masuk dari kanan, kembali masuk dari kiri. "Kurangi animasi" = cross-fade 150 ms saja.
+- Daftar lagu: scroll berbasis pegas (roda mouse/tombol), drag 1:1 dengan tepi lentur dan lemparan bermomentum, satu sorotan fokus yang meluncur antar kartu, tepi daftar memudar.
+- Tombol/kartu langsung bereaksi saat ditekan (mengecil 3 %), bayangan lembut bertingkat, garis terang tipis di tepi atas.
+- Tipografi: letter-spacing menyesuaikan ukuran (judul besar dirapatkan, label kapital kecil direnggangkan).
+- Opsi developer `--open songs|import|settings` untuk memotret layar.
+- Perbaikan kecil: subjudul gameplay tidak lagi diawali "·" bila artis kosong.
+- Perlu dirasakan pengguna: kenyamanan scroll/drag di Song Select (nilai pegas mudah disetel di `anim.rs`).
+
 ## Berikutnya / masalah terbuka
 - Pengguna: uji di Windows 11 (zip dari CI atau `cargo build --release`), uji dance mat sungguhan
   (evtest → wizard → main), uji GNOME, uji FPS gameplay di monitor 120 Hz+.

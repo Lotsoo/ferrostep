@@ -157,7 +157,8 @@ impl Calibration {
 
         if let Some((mean, sd)) = self.result {
             let ms = mean * 1000.0;
-            painter.text(
+            widgets::text_tracked(
+                &painter,
                 center,
                 Align2::CENTER_CENTER,
                 "✓",

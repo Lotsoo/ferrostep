@@ -62,7 +62,25 @@ Cancellation uses `Arc<AtomicBool>`.
 
 `Title`, `Onboarding`, `SongSelect`, `Import`, `Gameplay`, `Results`,
 `Settings` (with `Calibration`), `PadSetup`. Each screen's `ui()` returns an
-optional `Nav`; `app` performs the transition (fade + slide, 250 ms).
+optional `Nav`; `app` performs the transition.
+
+## Motion and materials (`ui/anim.rs`, `ui/widgets.rs`)
+
+Follows Apple's fluid-interface principles, adapted to egui:
+
+- `anim::Spring` (damping ratio + response, no fixed duration) is interruptible:
+  a new target keeps the current value and velocity. `SMOOTH` (1.0 / 0.35) is the
+  default; `MOMENTUM` (0.8 / 0.35) only after a flick.
+- Screen transitions slide 48 px along the navigation direction (deeper = from the
+  right, back = from the left). Reduced motion: a 150 ms cross-fade only.
+- Song Select list: wheel/keys move a spring target; drag tracks 1:1 with
+  rubber-band edges (`anim::rubberband`), and release hands the pointer velocity
+  to the spring and projects the landing point (`anim::project`, rate 0.998).
+  One focus highlight slides between cards; edges fade instead of cutting hard.
+- Controls react on press (3 % shrink + darker fill), not on release.
+- Surfaces have soft elevation shadows (`widgets::elevation`, larger cards are
+  deeper) and a faint top highlight. `widgets::text_tracked` applies
+  size-aware letter spacing (tight for large titles, open for small caps labels).
 
 ## Known platform limits
 

@@ -113,7 +113,8 @@ impl OnboardingScreen {
     ) -> Option<Nav> {
         let palette = shared.palette;
         let painter = ui.painter().clone();
-        painter.text(
+        widgets::text_tracked(
+            &painter,
             area.center_top(),
             Align2::CENTER_TOP,
             "Selamat datang di Ferrostep!",
@@ -223,7 +224,8 @@ impl OnboardingScreen {
     ) -> Option<Nav> {
         let palette = shared.palette;
         let painter = ui.painter().clone();
-        painter.text(
+        widgets::text_tracked(
+            &painter,
             area.center_top(),
             Align2::CENTER_TOP,
             "Samakan waktu suara dan layar",
@@ -285,7 +287,8 @@ impl OnboardingScreen {
 fn start_step(ui: &mut Ui, shared: &mut Shared, input: &FrameInput, area: Rect) -> Option<Nav> {
     let palette = shared.palette;
     let painter = ui.painter().clone();
-    painter.text(
+    widgets::text_tracked(
+        &painter,
         area.center_top(),
         Align2::CENTER_TOP,
         "Siap main!",

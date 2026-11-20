@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 
-use eframe::egui::{self, Align, Align2, Color32, Rect, Sense, Stroke, StrokeKind, Ui, pos2, vec2};
+use eframe::egui::{self, Align2, Color32, Rect, Sense, Stroke, StrokeKind, Ui, pos2, vec2};
 
 use super::{Nav, PlayRequest, difficulty_color, difficulty_label};
 use crate::app::Shared;
@@ -19,6 +19,7 @@ use crate::ui::{anim, widgets};
 /// Wait this long on a song before starting its preview.
 const PREVIEW_DELAY: f32 = 0.35;
 const CARD_H: f32 = 76.0;
+const CARD_GAP: f32 = 10.0;
 
 struct Preview {
     music: Music,
@@ -38,6 +39,15 @@ pub struct SongSelectScreen {
     changed_at: Instant,
     preview: Option<Preview>,
     scroll_to_selected: bool,
+    /// List scroll offset (px) and the sliding focus highlight (px), both springs.
+    scroll: anim::Spring,
+    focus: anim::Spring,
+    /// Scroll value when a drag started; `None` when not dragging.
+    drag_base: Option<f32>,
+    /// Pointer movement since the drag started (px).
+    drag_travel: f32,
+    /// First frame snaps instead of animating in from 0.
+    list_ready: bool,
     focus_search: bool,
     tint: Color32,
 }
@@ -54,6 +64,11 @@ impl Default for SongSelectScreen {
             changed_at: Instant::now(),
             preview: None,
             scroll_to_selected: true,
+            scroll: anim::Spring::new(0.0, anim::Spring::SMOOTH),
+            focus: anim::Spring::new(0.0, anim::Spring::SNAPPY),
+            drag_base: None,
+            drag_travel: 0.0,
+            list_ready: false,
             focus_search: true,
             tint: theme::ACCENT_A,
         }
@@ -252,7 +267,8 @@ impl SongSelectScreen {
 
         // ── Header ──────────────────────────────────────────────
         let header = Rect::from_min_size(rect.min, vec2(rect.width(), 56.0));
-        ui.painter().text(
+        widgets::text_tracked(
+            ui.painter(),
             header.left_center(),
             Align2::LEFT_CENTER,
             "Pilih Lagu",
@@ -332,6 +348,10 @@ impl SongSelectScreen {
         None
     }
 
+    /// The song list. Scrolling is spring-driven (Apple style): the wheel and
+    /// keyboard move a target the list glides to; dragging tracks the pointer
+    /// 1:1 with rubber-band edges and a momentum-projected release; one focus
+    /// highlight slides between cards instead of jumping.
     fn draw_list(
         &mut self,
         ui: &mut Ui,
@@ -340,150 +360,302 @@ impl SongSelectScreen {
         songs: &[Arc<SongEntry>],
         now: Instant,
     ) -> Option<Nav> {
+        let reduce = shared.settings.reduce_motion;
+        let dt = ui.input(|i| i.stable_dt);
+        let n = self.filtered.len();
+        let pitch = CARD_H + CARD_GAP;
+        let content_h = (n as f32 * pitch - CARD_GAP).max(0.0);
+        let max_offset = (content_h - rect.height()).max(0.0);
+        let row_top = |row: usize| row as f32 * pitch;
+
+        let response = ui.interact(
+            rect,
+            ui.scope_id().with("song-list"),
+            Sense::click_and_drag(),
+        );
+
+        // Keyboard / mat selection: glide so the selected card sits in the middle.
+        let selected_y = row_top(self.selected);
+        if std::mem::take(&mut self.scroll_to_selected) {
+            let target = (selected_y - (rect.height() - CARD_H) / 2.0).clamp(0.0, max_offset);
+            self.scroll.set_params(anim::Spring::SMOOTH);
+            self.scroll.set_target(target);
+        }
+        self.focus.set_target(selected_y);
+
+        // Mouse wheel / trackpad: move the target, the spring follows.
+        let wheel = if response.hovered() {
+            ui.input(|i| i.smooth_scroll_delta.y)
+        } else {
+            0.0
+        };
+        if wheel != 0.0 && self.drag_base.is_none() {
+            let target = (self.scroll.target - wheel).clamp(0.0, max_offset);
+            self.scroll.set_params(anim::Spring::SNAPPY);
+            self.scroll.set_target(target);
+        }
+
+        // Direct manipulation: 1:1 drag, starting from the on-screen value.
+        if response.drag_started() {
+            self.drag_base = Some(self.scroll.value);
+            self.drag_travel = 0.0;
+        }
+        if let Some(base) = self.drag_base {
+            // drag_delta is the movement since the last frame.
+            self.drag_travel += response.drag_delta().y;
+            let raw = base - self.drag_travel;
+            let shown = if raw < 0.0 {
+                anim::rubberband(raw, rect.height())
+            } else if raw > max_offset {
+                max_offset + anim::rubberband(raw - max_offset, rect.height())
+            } else {
+                raw
+            };
+            self.scroll.value = shown;
+            self.scroll.target = shown;
+            if response.drag_stopped() || !response.dragged() {
+                // Hand the finger's velocity to the spring and project where the
+                // flick would come to rest.
+                let velocity = -ui.input(|i| i.pointer.velocity().y);
+                let projected = shown + anim::project(velocity, 0.998);
+                self.scroll.velocity = velocity;
+                self.scroll.set_params(if velocity.abs() > 300.0 {
+                    anim::Spring::MOMENTUM
+                } else {
+                    anim::Spring::SMOOTH
+                });
+                self.scroll.set_target(projected.clamp(0.0, max_offset));
+                self.drag_base = None;
+                self.drag_travel = 0.0;
+            }
+        }
+        if self.drag_base.is_none() {
+            if reduce || !self.list_ready {
+                self.scroll.snap(self.scroll.target.clamp(0.0, max_offset));
+                self.focus.snap(selected_y);
+                self.list_ready = true;
+            } else {
+                self.scroll.step(dt);
+                self.focus.step(dt);
+            }
+        }
+        if !self.scroll.is_settled(0.3) || !self.focus.is_settled(0.3) || self.drag_base.is_some() {
+            ui.ctx().request_repaint();
+        }
+        let offset = self.scroll.value;
+        let top = rect.top() - offset;
+
+        // Which row is under the pointer (for hover and clicks).
+        let row_at = |y: f32| -> Option<usize> {
+            let local = y - top;
+            let row = (local / pitch).floor();
+            (row >= 0.0 && (row as usize) < n && local - row * pitch <= CARD_H)
+                .then_some(row as usize)
+        };
+        let hovered_row = response.hover_pos().and_then(|p| row_at(p.y));
+        let pressed_row = if response.is_pointer_button_down_on() && self.drag_base.is_none() {
+            ui.input(|i| i.pointer.interact_pos())
+                .and_then(|p| row_at(p.y))
+        } else {
+            None
+        };
+
         let palette = shared.palette;
+        let painter = ui.painter().with_clip_rect(rect.expand2(vec2(12.0, 0.0)));
+        let first = ((offset / pitch).floor().max(0.0)) as usize;
+        let last = (((offset + rect.height()) / pitch).ceil() as usize + 1).min(n);
+        for row in first..last {
+            let idx = self.filtered[row];
+            let song = &songs[idx];
+            let r = Rect::from_min_size(
+                pos2(rect.left(), top + row_top(row)),
+                vec2(rect.width() - 8.0, CARD_H),
+            );
+            let hover_id = ui.scope_id().with(("song-card", idx));
+            let selected = row == self.selected;
+            let hover = ui.ctx().animate_bool_with_time(
+                hover_id,
+                hovered_row == Some(row) || selected,
+                0.12,
+            );
+            let pressed = pressed_row == Some(row);
+            self.draw_card(&painter, r, song, selected, hover, pressed, shared, now);
+        }
+
+        // One focus highlight that slides between cards (spatial continuity).
+        if n > 0
+            && let Some(song) = songs.get(self.filtered[self.selected.min(n - 1)])
+        {
+            let y = top + self.focus.value;
+            let r =
+                Rect::from_min_size(pos2(rect.left() + 6.0, y), vec2(rect.width() - 8.0, CARD_H));
+            let color = widgets::color_from_hash(&song.title());
+            painter.rect_stroke(
+                r,
+                theme::RADIUS_CARD,
+                Stroke::new(1.5, color),
+                StrokeKind::Inside,
+            );
+            painter.rect_stroke(
+                r.expand(3.0),
+                theme::RADIUS_CARD + 3,
+                Stroke::new(3.0, color.gamma_multiply(0.18)),
+                StrokeKind::Outside,
+            );
+            let bar = Rect::from_min_size(
+                pos2(r.left() - 6.0, r.top() + 18.0),
+                vec2(3.0, r.height() - 36.0),
+            );
+            painter.rect_filled(bar, 2, color);
+        }
+
+        // Scroll edge effect: content fades under the edges instead of a hard cut.
+        if offset > 1.0 {
+            edge_fade(&painter, rect, true, &palette);
+        }
+        if offset < max_offset - 1.0 {
+            edge_fade(&painter, rect, false, &palette);
+        }
+
         let mut nav = None;
-        let mut clicked = None;
-        let scroll_to = std::mem::take(&mut self.scroll_to_selected);
-        let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect));
-        egui::ScrollArea::vertical()
-            .auto_shrink(false)
-            .show(&mut child, |ui| {
-                ui.spacing_mut().item_spacing.y = 10.0;
-                for (row, &idx) in self.filtered.iter().enumerate() {
-                    let song = &songs[idx];
-                    let (r, resp) = ui.allocate_exact_size(
-                        vec2(ui.available_width() - 8.0, CARD_H),
-                        Sense::click(),
-                    );
-                    if !ui.is_rect_visible(r) {
-                        continue;
-                    }
-                    let selected = row == self.selected;
-                    let hover = ui.ctx().animate_bool(resp.id, resp.hovered() || selected);
-                    let painter = ui.painter();
-                    let r = r.translate(vec2(if selected { 6.0 } else { hover * 3.0 }, 0.0));
-                    painter.rect_filled(
-                        r,
-                        theme::RADIUS_CARD,
-                        palette.surface.lerp_to_gamma(palette.surface_hover, hover),
-                    );
-                    let color = widgets::color_from_hash(&song.title());
-                    let stroke = if selected {
-                        Stroke::new(1.5, color)
-                    } else {
-                        palette.card_stroke()
-                    };
-                    painter.rect_stroke(r, theme::RADIUS_CARD, stroke, StrokeKind::Inside);
-                    // new-song highlight
-                    if let Some((dir, at)) = &shared.library.highlight
-                        && dir == &song.dir
-                    {
-                        let age = anim::since(*at, now);
-                        if age < 4.0 {
-                            let pulse = (1.0 - age / 4.0) * (0.5 + 0.5 * (age * 6.0).sin());
-                            painter.rect_stroke(
-                                r.expand(2.0),
-                                theme::RADIUS_CARD,
-                                Stroke::new(3.0, theme::SUCCESS.gamma_multiply(pulse)),
-                                StrokeKind::Outside,
-                            );
-                            ui.ctx().request_repaint();
-                        }
-                    }
-                    let swatch = Rect::from_min_size(r.min + vec2(14.0, 14.0), vec2(48.0, 48.0));
-                    widgets::gradient_rect(painter, swatch, color, color.gamma_multiply(0.4));
-                    painter.rect_stroke(
-                        swatch,
-                        10,
-                        Stroke::new(6.0, palette.surface),
-                        StrokeKind::Outside,
-                    );
-                    painter.text(
-                        swatch.center(),
-                        Align2::CENTER_CENTER,
-                        initials(&song.title()),
-                        font_bold(theme::TEXT_M),
-                        Color32::WHITE,
-                    );
-
-                    let text_x = swatch.right() + 16.0;
-                    painter.text(
-                        pos2(text_x, r.top() + 26.0),
-                        Align2::LEFT_CENTER,
-                        truncate(&song.title(), 38),
-                        font_bold(theme::TEXT_M),
-                        palette.text,
-                    );
-                    let sub = format!(
-                        "{} · {} BPM",
-                        if song.simfile.meta.artist.is_empty() {
-                            "Artis tidak diketahui"
-                        } else {
-                            &song.simfile.meta.artist
-                        },
-                        song.bpm_label
-                    );
-                    painter.text(
-                        pos2(text_x, r.top() + 52.0),
-                        Align2::LEFT_CENTER,
-                        truncate(&sub, 48),
-                        font(theme::TEXT_S),
-                        palette.text_dim,
-                    );
-
-                    let mut badge_x = r.right() - 16.0;
-                    if song.is_auto {
-                        let br = Rect::from_min_size(
-                            pos2(badge_x - 52.0, r.center().y - 12.0),
-                            vec2(52.0, 24.0),
-                        );
-                        painter.rect_filled(br, theme::RADIUS_PILL, ACCENT_B.gamma_multiply(0.18));
-                        painter.text(
-                            br.center(),
-                            Align2::CENTER_CENTER,
-                            "Auto",
-                            font_bold(theme::TEXT_XS),
-                            ACCENT_B,
-                        );
-                        badge_x -= 64.0;
-                    }
-                    let best = song
-                        .playable
-                        .iter()
-                        .filter_map(|&i| {
-                            shared
-                                .scores
-                                .get(&chart_key(&song.dir, &song.simfile.charts[i]))
-                        })
-                        .map(|b| b.percent)
-                        .fold(None, |acc: Option<f64>, p| {
-                            Some(acc.map_or(p, |a| a.max(p)))
-                        });
-                    if let Some(p) = best {
-                        painter.text(
-                            pos2(badge_x, r.center().y),
-                            Align2::RIGHT_CENTER,
-                            format!("{p:.1}%"),
-                            font_bold(theme::TEXT_S),
-                            theme::SUCCESS,
-                        );
-                    }
-
-                    if selected && scroll_to {
-                        resp.scroll_to_me(Some(Align::Center));
-                    }
-                    if resp.clicked() {
-                        clicked = Some(row);
-                    }
-                    if resp.double_clicked() {
-                        nav = Some(Nav::Play(self.play_request(song)));
-                    }
-                }
-            });
-        if let Some(row) = clicked {
+        if response.double_clicked() {
+            if let Some(row) = response.interact_pointer_pos().and_then(|p| row_at(p.y)) {
+                let song = &songs[self.filtered[row]];
+                nav = Some(Nav::Play(self.play_request(song)));
+            }
+        } else if response.clicked()
+            && let Some(row) = response.interact_pointer_pos().and_then(|p| row_at(p.y))
+        {
             self.select(row, songs);
+            self.scroll_to_selected = false; // clicking does not move the list under the pointer
         }
         nav
+    }
+
+    #[allow(clippy::too_many_arguments)] // drawing helper: all inputs are plain values
+    fn draw_card(
+        &self,
+        painter: &egui::Painter,
+        r: Rect,
+        song: &SongEntry,
+        selected: bool,
+        hover: f32,
+        pressed: bool,
+        shared: &Shared,
+        now: Instant,
+    ) {
+        let palette = shared.palette;
+        let r = r.translate(vec2(if selected { 6.0 } else { hover * 3.0 }, 0.0));
+        // Immediate feedback on press.
+        let r = if pressed {
+            Rect::from_center_size(r.center(), r.size() * 0.985)
+        } else {
+            r
+        };
+        widgets::elevation(painter, r, theme::RADIUS_CARD, widgets::Elevation::Low);
+        let fill = palette.surface.lerp_to_gamma(palette.surface_hover, hover);
+        painter.rect_filled(
+            r,
+            theme::RADIUS_CARD,
+            if pressed {
+                fill.lerp_to_gamma(Color32::BLACK, 0.12)
+            } else {
+                fill
+            },
+        );
+        painter.rect_stroke(
+            r,
+            theme::RADIUS_CARD,
+            palette.card_stroke(),
+            StrokeKind::Inside,
+        );
+        widgets::top_highlight(painter, r, theme::RADIUS_CARD, 0.07);
+        let color = widgets::color_from_hash(&song.title());
+
+        // New-song highlight
+        if let Some((dir, at)) = &shared.library.highlight
+            && dir == &song.dir
+        {
+            let age = anim::since(*at, now);
+            if age < 4.0 {
+                let pulse = (1.0 - age / 4.0) * (0.5 + 0.5 * (age * 6.0).sin());
+                painter.rect_stroke(
+                    r.expand(2.0),
+                    theme::RADIUS_CARD,
+                    Stroke::new(3.0, theme::SUCCESS.gamma_multiply(pulse)),
+                    StrokeKind::Outside,
+                );
+                painter.ctx().request_repaint();
+            }
+        }
+        let swatch = Rect::from_min_size(r.min + vec2(14.0, 14.0), vec2(48.0, 48.0));
+        widgets::gradient_rect(painter, swatch, color, color.gamma_multiply(0.4));
+        painter.rect_stroke(swatch, 10, Stroke::new(6.0, fill), StrokeKind::Outside);
+        painter.text(
+            swatch.center(),
+            Align2::CENTER_CENTER,
+            initials(&song.title()),
+            font_bold(theme::TEXT_M),
+            Color32::WHITE,
+        );
+
+        let text_x = swatch.right() + 16.0;
+        painter.text(
+            pos2(text_x, r.top() + 26.0),
+            Align2::LEFT_CENTER,
+            truncate(&song.title(), 38),
+            font_bold(theme::TEXT_M),
+            palette.text,
+        );
+        let artist = if song.simfile.meta.artist.is_empty() {
+            "Artis tidak diketahui"
+        } else {
+            &song.simfile.meta.artist
+        };
+        let sub = format!("{artist} · {} BPM", song.bpm_label);
+        painter.text(
+            pos2(text_x, r.top() + 52.0),
+            Align2::LEFT_CENTER,
+            truncate(&sub, 48),
+            font(theme::TEXT_S),
+            palette.text_dim,
+        );
+
+        let mut badge_x = r.right() - 16.0;
+        if song.is_auto {
+            let br =
+                Rect::from_min_size(pos2(badge_x - 52.0, r.center().y - 12.0), vec2(52.0, 24.0));
+            painter.rect_filled(br, theme::RADIUS_PILL, ACCENT_B.gamma_multiply(0.18));
+            painter.text(
+                br.center(),
+                Align2::CENTER_CENTER,
+                "Auto",
+                font_bold(theme::TEXT_XS),
+                ACCENT_B,
+            );
+            badge_x -= 64.0;
+        }
+        let best = song
+            .playable
+            .iter()
+            .filter_map(|&i| {
+                shared
+                    .scores
+                    .get(&chart_key(&song.dir, &song.simfile.charts[i]))
+            })
+            .map(|b| b.percent)
+            .fold(None, |acc: Option<f64>, p| {
+                Some(acc.map_or(p, |a| a.max(p)))
+            });
+        if let Some(p) = best {
+            painter.text(
+                pos2(badge_x, r.center().y),
+                Align2::RIGHT_CENTER,
+                format!("{p:.1}%"),
+                font_bold(theme::TEXT_S),
+                theme::SUCCESS,
+            );
+        }
     }
 
     fn draw_details(
@@ -522,10 +694,11 @@ impl SongSelectScreen {
             Color32::WHITE,
             0.4,
         );
-        painter.text(
+        widgets::text_tracked(
+            &painter,
             banner.left_bottom() + vec2(20.0, -20.0),
             Align2::LEFT_BOTTOM,
-            truncate(&song.title(), 30),
+            &truncate(&song.title(), 30),
             font_bold(theme::TEXT_XL),
             Color32::WHITE,
         );
@@ -693,7 +866,8 @@ impl SongSelectScreen {
             font_bold(48.0),
             theme::ACCENT_B,
         );
-        p.text(
+        widgets::text_tracked(
+            p,
             card.center_top() + vec2(0.0, 120.0),
             Align2::CENTER_CENTER,
             "Belum ada lagu",
@@ -748,6 +922,31 @@ fn initials(title: &str) -> String {
 }
 
 /// Shortens text to `max` characters with an ellipsis.
+/// Soft fade where the list meets the edge of its area (scroll edge effect).
+fn edge_fade(painter: &egui::Painter, rect: Rect, top: bool, palette: &theme::Palette) {
+    const H: f32 = 28.0;
+    let base = if top {
+        palette.bg_top
+    } else {
+        palette.bg_bottom
+    };
+    let band = if top {
+        Rect::from_min_size(
+            rect.left_top() - vec2(12.0, 0.0),
+            vec2(rect.width() + 24.0, H),
+        )
+    } else {
+        Rect::from_min_size(
+            rect.left_bottom() - vec2(12.0, H),
+            vec2(rect.width() + 24.0, H),
+        )
+    };
+    let solid = base.gamma_multiply(0.9);
+    let clear = Color32::TRANSPARENT;
+    let (a, b) = if top { (solid, clear) } else { (clear, solid) };
+    widgets::vertical_gradient(painter, band, a, b);
+}
+
 pub fn truncate(text: &str, max: usize) -> String {
     if text.chars().count() <= max {
         text.to_string()

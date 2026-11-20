@@ -74,12 +74,14 @@ impl GameplayScreen {
         let song_length = session.end_time;
         Ok(Self {
             title: sim.meta.title.clone(),
-            subtitle: format!(
-                "{} · {} {}",
-                sim.meta.artist,
-                difficulty_label(chart.difficulty),
-                chart.meter
-            ),
+            subtitle: {
+                let level = format!("{} {}", difficulty_label(chart.difficulty), chart.meter);
+                if sim.meta.artist.trim().is_empty() {
+                    level
+                } else {
+                    format!("{} · {level}", sim.meta.artist)
+                }
+            },
             tint: widgets::color_from_hash(&sim.meta.title),
             request,
             music_path,
@@ -450,7 +452,8 @@ impl GameplayScreen {
                 font_bold(44.0 * bump),
                 Color32::WHITE.gamma_multiply(0.85),
             );
-            painter.text(
+            widgets::text_tracked(
+                painter,
                 pos + vec2(0.0, 80.0),
                 Align2::CENTER_CENTER,
                 "COMBO",
@@ -470,7 +473,8 @@ impl GameplayScreen {
 
         self.draw_life_bar(painter, rect, shared.settings.no_fail);
         if shared.autoplay {
-            painter.text(
+            widgets::text_tracked(
+                painter,
                 rect.center_bottom() - vec2(0.0, 24.0),
                 Align2::CENTER_CENTER,
                 "AUTOPLAY",
@@ -521,7 +525,8 @@ impl GameplayScreen {
         let score = &self.session.score;
         let life = score.life.clamp(0.0, 1.0);
         let frame = Rect::from_min_size(rect.left_top() + vec2(24.0, 16.0), vec2(300.0, 22.0));
-        painter.text(
+        widgets::text_tracked(
+            painter,
             frame.left_center() + vec2(0.0, 0.0),
             Align2::LEFT_CENTER,
             "LIFE",
@@ -598,7 +603,8 @@ impl GameplayScreen {
         let score = &self.session.score;
         let earned = (score.percent() / 100.0) as f32;
         let possible = (score.max_possible_percent() / 100.0) as f32;
-        painter.text(
+        widgets::text_tracked(
+            painter,
             bar.left_center() - vec2(10.0, 0.0),
             Align2::RIGHT_CENTER,
             "SKOR",
@@ -653,7 +659,8 @@ impl GameplayScreen {
         let palette = shared.palette;
         let card = Rect::from_center_size(rect.center(), vec2(380.0, 300.0));
         widgets::card(&painter, card, &palette);
-        painter.text(
+        widgets::text_tracked(
+            &painter,
             card.center_top() + vec2(0.0, 40.0),
             Align2::CENTER_CENTER,
             "Dijeda",

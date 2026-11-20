@@ -32,6 +32,8 @@ pub struct LaunchOptions {
     pub chart: Option<usize>,
     /// The game hits every note itself (scores are not saved).
     pub autoplay: bool,
+    /// Open this screen first: `songs`, `import` or `settings`.
+    pub open: Option<String>,
 }
 
 /// State shared by all screens.
@@ -100,11 +102,27 @@ pub struct FerrostepApp {
     input: InputHub,
     screen: Screen,
     transition_start: Instant,
+    /// Screen transition progress 0 → 1 (spring, interruptible).
+    transition: anim::Spring,
+    /// +1 when going deeper (new screen enters from the right), −1 when going back.
+    transition_dir: f32,
     /// Frames counted since `fps_since` (logged at debug level).
     fps_frames: u32,
     fps_since: Instant,
     /// CPU time spent building frames since `fps_since` (seconds).
     fps_work: f32,
+}
+
+impl Screen {
+    /// How deep a screen sits in the navigation, for transition direction.
+    fn depth(&self) -> u8 {
+        match self {
+            Screen::Title(_) | Screen::Onboarding(_) => 0,
+            Screen::SongSelect(_) | Screen::Import(_) | Screen::Settings(_) => 1,
+            Screen::PadSetup(_) | Screen::Gameplay(_) => 2,
+            Screen::Results(_) => 3,
+        }
+    }
 }
 
 impl FerrostepApp {
@@ -165,10 +183,19 @@ impl FerrostepApp {
             input: InputHub::new(&cc.egui_ctx),
             screen: first_screen,
             transition_start: now,
+            transition: anim::Spring::new(1.0, anim::Spring::SMOOTH),
+            transition_dir: 1.0,
             fps_frames: 0,
             fps_since: now,
             fps_work: 0.0,
         };
+        match launch.open.as_deref() {
+            Some("songs") => app.navigate(&cc.egui_ctx, Nav::SongSelect),
+            Some("import") => app.navigate(&cc.egui_ctx, Nav::Import(Vec::new())),
+            Some("settings") => app.navigate(&cc.egui_ctx, Nav::Settings),
+            Some(other) => log::warn!("--open: unknown screen '{other}'"),
+            None => {}
+        }
         if let Some(dir) = launch.play {
             app.play_from_command_line(&cc.egui_ctx, &dir, launch.chart);
         }
@@ -237,8 +264,14 @@ impl FerrostepApp {
                 return;
             }
         };
+        // Spatial consistency: deeper screens arrive from the right, going back
+        // brings the previous screen in from the left — the way it left.
+        let (from, to) = (self.screen.depth(), next.depth());
+        self.transition_dir = if to >= from { 1.0 } else { -1.0 };
         self.screen = next;
         self.transition_start = Instant::now();
+        self.transition.snap(0.0);
+        self.transition.set_target(1.0);
     }
 
     /// Saves a new best score and fills `previous_best`.
@@ -428,17 +461,22 @@ impl eframe::App for FerrostepApp {
             widgets::background(ui.painter(), full, &self.shared.palette, t, None);
         }
 
-        // Transition: new screens slide up 16 px and fade in.
-        let e = anim::ease_out_cubic(anim::progress(
-            self.transition_start,
-            now,
-            anim::TRANSITION,
-            reduce,
-        ));
-        let mut child =
-            ui.new_child(UiBuilder::new().max_rect(full.translate(vec2(0.0, (1.0 - e) * 16.0))));
+        // Transition: a critically damped spring slides the new screen in from
+        // the side it belongs to. Reduced motion: a short cross-fade only.
+        let e = if reduce {
+            anim::progress(self.transition_start, now, 0.15, false)
+        } else {
+            let dt = ctx.input(|i| i.stable_dt);
+            self.transition.step(dt).clamp(0.0, 1.0)
+        };
+        let shift = if reduce {
+            0.0
+        } else {
+            (1.0 - e) * 48.0 * self.transition_dir
+        };
+        let mut child = ui.new_child(UiBuilder::new().max_rect(full.translate(vec2(shift, 0.0))));
         let mut nav = self.screen_ui(&mut child, &input);
-        if e < 1.0 {
+        if e < 0.999 {
             let base = self.shared.palette.bg_top;
             ui.painter().rect_filled(
                 full,

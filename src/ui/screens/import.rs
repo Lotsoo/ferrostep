@@ -216,7 +216,8 @@ impl ImportScreen {
             }
             nav = Some(Nav::Title);
         }
-        painter.text(
+        widgets::text_tracked(
+            &painter,
             pos2(back.right() + 24.0, back.center().y),
             Align2::LEFT_CENTER,
             "Impor Lagu",
@@ -378,10 +379,11 @@ impl ImportScreen {
             font(theme::TEXT_S),
             palette.text_dim,
         );
-        painter.text(
+        widgets::text_tracked(
+            &painter,
             inner.left_top() + vec2(0.0, 22.0),
             Align2::LEFT_TOP,
-            super::song_select::truncate(&name, 60),
+            &super::song_select::truncate(&name, 60),
             font_bold(theme::TEXT_L),
             palette.text,
         );
@@ -526,10 +528,11 @@ impl ImportScreen {
             font(theme::TEXT_S),
             SUCCESS,
         );
-        painter.text(
+        widgets::text_tracked(
+            &painter,
             inner.left_top() + vec2(0.0, 24.0),
             Align2::LEFT_TOP,
-            super::song_select::truncate(&meta.title, 48),
+            &super::song_select::truncate(&meta.title, 48),
             font_bold(theme::TEXT_XL),
             palette.text,
         );
@@ -663,10 +666,11 @@ impl ImportScreen {
                 font_bold(theme::TEXT_S),
                 color,
             );
-            painter.text(
+            widgets::text_tracked(
+                &painter,
                 r.right_top() + vec2(-16.0, 8.0),
                 Align2::RIGHT_TOP,
-                chart.meter.to_string(),
+                &chart.meter.to_string(),
                 font_bold(theme::TEXT_XL),
                 palette.text,
             );
@@ -744,14 +748,16 @@ impl ImportScreen {
             24.0,
             Stroke::new(3.0, DANGER),
         );
-        painter.text(
+        widgets::text_tracked(
+            &painter,
             card.center_top() + vec2(0.0, 56.0),
             Align2::CENTER_CENTER,
             "!",
             font_bold(theme::TEXT_L),
             DANGER,
         );
-        painter.text(
+        widgets::text_tracked(
+            &painter,
             card.center_top() + vec2(0.0, 104.0),
             Align2::CENTER_TOP,
             "Lagu ini belum bisa diimpor",

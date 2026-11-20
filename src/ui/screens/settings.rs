@@ -115,7 +115,8 @@ impl SettingsScreen {
         // Calibration takes the whole content area.
         if let Some(cal) = &mut self.calibration {
             let area = rect.shrink2(vec2(48.0, 40.0));
-            ui.painter().text(
+            widgets::text_tracked(
+                ui.painter(),
                 area.left_top(),
                 Align2::LEFT_TOP,
                 "Kalibrasi offset",
@@ -182,7 +183,8 @@ impl SettingsScreen {
         {
             return Some(Nav::Title);
         }
-        ui.painter().text(
+        widgets::text_tracked(
+            ui.painter(),
             pos2(back.right() + 24.0, back.center().y),
             Align2::LEFT_CENTER,
             "Pengaturan",

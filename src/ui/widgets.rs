@@ -108,14 +108,24 @@ pub fn primary_button(ui: &mut Ui, text: &str, size: egui::Vec2, enabled: bool) 
         response.id,
         enabled && (response.hovered() || response.has_focus()),
     );
+    let pressed = enabled && response.is_pointer_button_down_on();
     let painter = ui.painter();
-    let rect = rect.expand(hover * 2.0);
+    elevation(painter, rect, RADIUS_BUTTON, Elevation::Low);
+    // Feedback on press, not on release: shrink 3 % instantly.
+    let rect = press_rect(rect.expand(hover * 2.0), pressed);
     let (a, b) = if enabled {
         (ACCENT_A, ACCENT_B)
     } else {
         (Color32::from_gray(70), Color32::from_gray(90))
     };
-    painter.rect_filled(rect, RADIUS_BUTTON, a.lerp_to_gamma(b, 0.25 + hover * 0.5));
+    let fill = a.lerp_to_gamma(b, 0.25 + hover * 0.5);
+    let fill = if pressed {
+        fill.lerp_to_gamma(Color32::BLACK, 0.12)
+    } else {
+        fill
+    };
+    painter.rect_filled(rect, RADIUS_BUTTON, fill);
+    top_highlight(painter, rect, RADIUS_BUTTON, 0.22);
     if hover > 0.0 {
         painter.rect_stroke(
             rect,
@@ -140,12 +150,20 @@ pub fn secondary_button(ui: &mut Ui, palette: &Palette, text: &str, size: egui::
     let hover = ui
         .ctx()
         .animate_bool(response.id, response.hovered() || response.has_focus());
+    let pressed = response.is_pointer_button_down_on();
     let painter = ui.painter();
+    let rect = press_rect(rect, pressed);
+    let fill = palette.surface.lerp_to_gamma(palette.surface_hover, hover);
     painter.rect_filled(
         rect,
         RADIUS_BUTTON,
-        palette.surface.lerp_to_gamma(palette.surface_hover, hover),
+        if pressed {
+            fill.lerp_to_gamma(Color32::BLACK, 0.15)
+        } else {
+            fill
+        },
     );
+    top_highlight(painter, rect, RADIUS_BUTTON, 0.08);
     painter.rect_stroke(
         rect,
         RADIUS_BUTTON,
@@ -174,13 +192,16 @@ pub fn menu_tile(
     let (rect, response) = ui.allocate_exact_size(size, Sense::click());
     let active = response.hovered() || selected;
     let t = ui.ctx().animate_bool(response.id, active);
+    let pressed = response.is_pointer_button_down_on();
     let painter = ui.painter();
-    let rect = rect.translate(vec2(t * 6.0, 0.0));
+    let rect = press_rect(rect.translate(vec2(t * 6.0, 0.0)), pressed);
+    elevation(painter, rect, RADIUS_CARD, Elevation::Medium);
     painter.rect_filled(
         rect,
         RADIUS_CARD,
         palette.surface.lerp_to_gamma(palette.surface_hover, t),
     );
+    top_highlight(painter, rect, RADIUS_CARD, 0.10);
     painter.rect_stroke(rect, RADIUS_CARD, palette.card_stroke(), StrokeKind::Inside);
     if t > 0.0 {
         let bar = Rect::from_min_size(
@@ -189,7 +210,8 @@ pub fn menu_tile(
         );
         painter.rect_filled(bar, 2, ACCENT_B.gamma_multiply(t));
     }
-    painter.text(
+    text_tracked(
+        painter,
         rect.left_center() + vec2(24.0, -11.0),
         Align2::LEFT_CENTER,
         title,
@@ -203,7 +225,8 @@ pub fn menu_tile(
         font(theme::TEXT_S),
         palette.text_dim,
     );
-    painter.text(
+    text_tracked(
+        painter,
         rect.right_center() - vec2(24.0 - t * 4.0, 0.0),
         Align2::RIGHT_CENTER,
         "›",
@@ -215,8 +238,108 @@ pub fn menu_tile(
 
 /// Rounded card background.
 pub fn card(painter: &Painter, rect: Rect, palette: &Palette) {
+    // Bigger surfaces read as thicker material: deeper shadow.
+    let level = if rect.area() > 200_000.0 {
+        Elevation::High
+    } else {
+        Elevation::Medium
+    };
+    elevation(painter, rect, RADIUS_CARD, level);
     painter.rect_filled(rect, RADIUS_CARD, palette.surface);
     painter.rect_stroke(rect, RADIUS_CARD, palette.card_stroke(), StrokeKind::Inside);
+    top_highlight(
+        painter,
+        rect,
+        RADIUS_CARD,
+        if palette.dark { 0.10 } else { 0.5 },
+    );
+}
+
+/// How far a surface floats above the background.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Elevation {
+    Low,
+    Medium,
+    High,
+}
+
+/// Soft drop shadow under a surface (depth conveys hierarchy).
+pub fn elevation(painter: &Painter, rect: Rect, radius: u8, level: Elevation) {
+    let (offset, blur, alpha) = match level {
+        Elevation::Low => (2, 8, 50),
+        Elevation::Medium => (6, 20, 60),
+        Elevation::High => (12, 40, 80),
+    };
+    let shadow = egui::epaint::Shadow {
+        offset: [0, offset],
+        blur,
+        spread: 0,
+        color: Color32::from_black_alpha(alpha),
+    };
+    painter.add(shadow.as_shape(rect, radius));
+}
+
+/// A thin bright line along the top edge: light catching the material.
+pub fn top_highlight(painter: &Painter, rect: Rect, radius: u8, strength: f32) {
+    let band = Rect::from_min_max(
+        rect.min,
+        pos2(rect.right(), rect.top() + f32::from(radius) + 2.0),
+    );
+    painter.with_clip_rect(band).rect_stroke(
+        rect,
+        radius,
+        Stroke::new(1.0, Color32::WHITE.gamma_multiply(strength)),
+        StrokeKind::Inside,
+    );
+}
+
+/// Pressed controls shrink by 3 % around their center — immediately.
+fn press_rect(rect: Rect, pressed: bool) -> Rect {
+    if pressed {
+        Rect::from_center_size(rect.center(), rect.size() * 0.97)
+    } else {
+        rect
+    }
+}
+
+/// Text with size-aware tracking (letter spacing), Apple style: large text is
+/// tightened, small all-caps labels are opened up. Returns the drawn rect.
+pub fn text_tracked(
+    painter: &Painter,
+    pos: Pos2,
+    anchor: Align2,
+    text: &str,
+    font_id: egui::FontId,
+    color: Color32,
+) -> Rect {
+    let size = font_id.size;
+    let is_caps_label = size <= 13.0 && text.chars().all(|c| !c.is_lowercase());
+    let tracking_em = if is_caps_label {
+        0.08
+    } else if size >= 40.0 {
+        -0.025
+    } else if size >= 28.0 {
+        -0.02
+    } else if size >= 20.0 {
+        -0.01
+    } else {
+        0.0
+    };
+    let mut job = egui::text::LayoutJob::default();
+    job.append(
+        text,
+        0.0,
+        egui::TextFormat {
+            font_id,
+            color,
+            extra_letter_spacing: tracking_em * size,
+            ..Default::default()
+        },
+    );
+    let galley = painter.layout_job(job);
+    let rect = anchor.anchor_size(pos, galley.size());
+    painter.galley(rect.min, galley, color);
+    rect
 }
 
 /// A frame that looks like a card, for egui layouts.

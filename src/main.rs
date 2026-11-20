@@ -75,6 +75,7 @@ Pemakaian: ferrostep [opsi]
   --play <folder lagu>    Langsung mainkan lagu di folder itu (untuk pengujian)
   --chart <nomor>         Pilih chart (indeks di simfile) untuk --play
   --autoplay              Game menekan panah sendiri (skor tidak disimpan)
+  --open <layar>          Buka langsung: songs, import, atau settings
   -h, --help              Tampilkan bantuan ini
 
 Log rinci: RUST_LOG=ferrostep=debug";
@@ -97,6 +98,7 @@ fn parse_launch(args: &[String]) -> Result<app::LaunchOptions, String> {
                 );
             }
             "--autoplay" => launch.autoplay = true,
+            "--open" => launch.open = Some(it.next().ok_or("--open butuh nama layar")?.clone()),
             "--make-test-song" => {}
             // Ignore unknown flags some launchers add (e.g. -psn_ on macOS).
             other => log::debug!("ignoring argument {other}"),
