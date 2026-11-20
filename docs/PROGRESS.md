@@ -12,6 +12,7 @@
 - Jendela "Halo, Ferrostep!" dengan tema gelap + beep sinus sintetis lewat kira.
   **Terverifikasi oleh pengguna di Fedora 45 KDE Wayland:** jendela muncul, suara terdengar.
   GPU: Intel Iris Xe (Vulkan, Mesa 26.2.6).
+- fmt + clippy (`-D warnings`) + test bersih; commit pertama `3de3b26`.
 
 ### Catatan teknis
 - eframe 0.37: method wajib trait `App` adalah `fn ui(&mut self, ui: &mut egui::Ui, frame)` (bukan `update`).
@@ -20,7 +21,6 @@
 - Warning `libvulkan_dzn.so` (driver Dozen) normal dan tidak berbahaya; log pustaka yang ramai difilter di `main.rs`.
 
 ### Berikutnya
-- Jalankan `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, `cargo test`, lalu commit pertama.
 - Belum diuji di Windows 11.
 - Fase 1: parser `.sm`/`.ssc`, writer `.sm`, modul `timing`, beserta test.
 
