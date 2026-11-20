@@ -17,6 +17,18 @@ fn main() -> eframe::Result {
     )
     .init();
 
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.iter().any(|a| a == "--help" || a == "-h") {
+        println!("{HELP}");
+        return Ok(());
+    }
+    let launch = match parse_launch(&args) {
+        Ok(l) => l,
+        Err(e) => {
+            eprintln!("{e}\n\n{HELP}");
+            std::process::exit(2);
+        }
+    };
     if std::env::args().any(|a| a == "--make-test-song") {
         let settings = Settings::load();
         let songs = library::songs_dir(&settings);
@@ -46,13 +58,51 @@ fn main() -> eframe::Result {
     let result = eframe::run_native(
         "Ferrostep",
         options,
-        Box::new(|cc| Ok(Box::new(app::FerrostepApp::new(cc)))),
+        Box::new(|cc| Ok(Box::new(app::FerrostepApp::new(cc, launch)))),
     );
     if let Err(e) = &result {
         log::error!("could not start: {e}");
         offer_graphics_fallback(settings, &e.to_string());
     }
     result
+}
+
+const HELP: &str = "Ferrostep — game ritme 4 panah
+
+Pemakaian: ferrostep [opsi]
+
+  --make-test-song        Buat lagu metronom di Songs/_Test/Metronome lalu keluar
+  --play <folder lagu>    Langsung mainkan lagu di folder itu (untuk pengujian)
+  --chart <nomor>         Pilih chart (indeks di simfile) untuk --play
+  --autoplay              Game menekan panah sendiri (skor tidak disimpan)
+  -h, --help              Tampilkan bantuan ini
+
+Log rinci: RUST_LOG=ferrostep=debug";
+
+/// Parses developer options.
+fn parse_launch(args: &[String]) -> Result<app::LaunchOptions, String> {
+    let mut launch = app::LaunchOptions::default();
+    let mut it = args.iter();
+    while let Some(arg) = it.next() {
+        match arg.as_str() {
+            "--play" => {
+                let dir = it.next().ok_or("--play butuh folder lagu")?;
+                launch.play = Some(dir.into());
+            }
+            "--chart" => {
+                let n = it.next().ok_or("--chart butuh angka")?;
+                launch.chart = Some(
+                    n.parse()
+                        .map_err(|_| format!("--chart: '{n}' bukan angka"))?,
+                );
+            }
+            "--autoplay" => launch.autoplay = true,
+            "--make-test-song" => {}
+            // Ignore unknown flags some launchers add (e.g. -psn_ on macOS).
+            other => log::debug!("ignoring argument {other}"),
+        }
+    }
+    Ok(launch)
 }
 
 /// Taskbar/window icon (Windows, X11). Wayland uses the .desktop file's icon.

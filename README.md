@@ -106,6 +106,8 @@ cargo run                       # jalankan
 cargo test                      # semua test (tanpa perangkat/audio)
 cargo run -- --make-test-song   # buat lagu metronom di Songs/_Test/
 RUST_LOG=ferrostep=debug cargo run   # log rinci, termasuk FPS
+cargo run -- --play "Songs/_Test/Metronome" --autoplay   # langsung main, game menekan sendiri
+cargo run -- --help             # semua opsi
 ```
 
 Membuat RPM:

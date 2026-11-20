@@ -78,14 +78,30 @@ impl Score {
         }
     }
 
+    /// Points earned and the maximum points of the notes judged so far.
+    fn judged_dp(&self) -> (i64, i64) {
+        let judged: i64 = self.counts.iter().map(|c| i64::from(*c)).sum::<i64>() * DP_WEIGHTS[0]
+            + i64::from(self.holds_ok + self.holds_ng) * DP_HOLD_OK;
+        (self.dp, judged)
+    }
+
+    /// Accuracy so far (Etterna style): starts at 100 % and only drops on
+    /// imperfect steps. Equals [`Score::percent`] once every note is judged.
+    pub fn accuracy_percent(&self) -> f64 {
+        let (dp, judged) = self.judged_dp();
+        if judged == 0 {
+            return 100.0;
+        }
+        (dp.max(0) as f64 / judged as f64 * 100.0).clamp(0.0, 100.0)
+    }
+
     /// Highest percentage still reachable if every remaining note is perfect.
     pub fn max_possible_percent(&self) -> f64 {
         if self.max_dp == 0 {
             return 0.0;
         }
-        let judged: i64 = self.counts.iter().map(|c| i64::from(*c)).sum::<i64>() * DP_WEIGHTS[0]
-            + i64::from(self.holds_ok + self.holds_ng) * DP_HOLD_OK;
-        let lost = (judged - self.dp).max(0);
+        let (dp, judged) = self.judged_dp();
+        let lost = (judged - dp).max(0);
         ((self.max_dp - lost) as f64 / self.max_dp as f64 * 100.0).clamp(0.0, 100.0)
     }
 
@@ -162,5 +178,7 @@ mod tests {
         s.add_judgment(Judgment::Great, 0.0, Some(0.05)); // 1 of 3 points
         assert!((s.max_possible_percent() - 10.0 / 12.0 * 100.0).abs() < 1e-9);
         assert!((s.percent() - 1.0 / 12.0 * 100.0).abs() < 1e-9);
+        assert!((s.accuracy_percent() - 100.0 / 3.0).abs() < 1e-9);
+        assert_eq!(Score::new(4, 0).accuracy_percent(), 100.0);
     }
 }

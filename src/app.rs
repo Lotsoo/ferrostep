@@ -23,6 +23,17 @@ use crate::ui::screens::{Nav, ResultData};
 use crate::ui::theme::{self, Palette};
 use crate::ui::{Toasts, anim, fonts, widgets};
 
+/// Command-line options for developers (see `--help`).
+#[derive(Debug, Clone, Default)]
+pub struct LaunchOptions {
+    /// Start playing this song folder right away.
+    pub play: Option<std::path::PathBuf>,
+    /// Chart index inside the simfile (default: the hardest playable chart).
+    pub chart: Option<usize>,
+    /// The game hits every note itself (scores are not saved).
+    pub autoplay: bool,
+}
+
 /// State shared by all screens.
 pub struct Shared {
     pub settings: Settings,
@@ -46,6 +57,8 @@ pub struct Shared {
     pub save_pad_profile: Option<(String, DeviceProfile)>,
     /// Connected gamepads / dance mats: (profile key, name).
     pub connected_pads: Vec<(String, String)>,
+    /// AutoPlay mode from the command line.
+    pub autoplay: bool,
     /// Theme and UI scale currently applied to egui.
     applied_look: (crate::config::ThemeChoice, f32),
 }
@@ -95,7 +108,7 @@ pub struct FerrostepApp {
 }
 
 impl FerrostepApp {
-    pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
+    pub fn new(cc: &eframe::CreationContext<'_>, launch: LaunchOptions) -> Self {
         fonts::install(&cc.egui_ctx);
         let settings = Settings::load();
         let palette = Palette::for_choice(settings.theme);
@@ -130,7 +143,7 @@ impl FerrostepApp {
             Screen::Onboarding(Box::default())
         };
         let now = Instant::now();
-        Self {
+        let mut app = Self {
             shared: Shared {
                 library: Library::new(root, &cc.egui_ctx),
                 saved_settings: settings.clone(),
@@ -146,6 +159,7 @@ impl FerrostepApp {
                 pending_nav: None,
                 save_pad_profile: None,
                 connected_pads: Vec::new(),
+                autoplay: launch.autoplay,
                 applied_look: (settings_theme, settings_scale),
             },
             input: InputHub::new(&cc.egui_ctx),
@@ -154,7 +168,35 @@ impl FerrostepApp {
             fps_frames: 0,
             fps_since: now,
             fps_work: 0.0,
+        };
+        if let Some(dir) = launch.play {
+            app.play_from_command_line(&cc.egui_ctx, &dir, launch.chart);
         }
+        app
+    }
+
+    /// `--play <folder>`: skip the menus and start a chart.
+    fn play_from_command_line(
+        &mut self,
+        ctx: &egui::Context,
+        dir: &std::path::Path,
+        chart: Option<usize>,
+    ) {
+        let Some(song) = crate::library::scanner::load_song(dir, "") else {
+            log::error!("--play: no playable simfile in {}", dir.display());
+            return;
+        };
+        let Some(&hardest) = song.playable.last() else {
+            log::error!("--play: no dance-single chart in {}", dir.display());
+            return;
+        };
+        let chart_index = chart.unwrap_or(hardest);
+        let request = crate::ui::screens::PlayRequest {
+            simfile: song.simfile.clone(),
+            song_dir: song.dir.clone(),
+            chart_index,
+        };
+        self.navigate(ctx, Nav::Play(request));
     }
 
     fn navigate(&mut self, ctx: &egui::Context, nav: Nav) {
@@ -201,6 +243,9 @@ impl FerrostepApp {
 
     /// Saves a new best score and fills `previous_best`.
     fn record_score(&mut self, mut data: ResultData) -> ResultData {
+        if self.shared.autoplay {
+            return data; // AutoPlay results are not real scores.
+        }
         let chart = &data.request.simfile.charts[data.request.chart_index];
         let key = chart_key(&data.request.song_dir, chart);
         let failed = data.score.failed && !data.no_fail;

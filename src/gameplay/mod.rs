@@ -230,6 +230,47 @@ impl GameSession {
         }
     }
 
+    /// AutoPlay: hits every note perfectly up to song time `t`, holds holds,
+    /// keeps rolls alive and avoids mines. For demos and for checking charts/sync.
+    /// Call before [`GameSession::update`] each frame.
+    pub fn autoplay(&mut self, t: f64) {
+        for col in 0..self.columns {
+            let column = col as u8;
+            let due: Vec<usize> = self.by_column[col][self.next[col]..]
+                .iter()
+                .copied()
+                .take_while(|&i| self.notes[i].note.time <= t)
+                .filter(|&i| self.notes[i].judgment.is_none())
+                .collect();
+            for idx in due {
+                let time = self.notes[idx].note.time;
+                self.press(column, time);
+                if !self.notes[idx].is_hold() {
+                    self.release(column, time);
+                }
+            }
+            let active: Vec<(bool, f64)> = self.by_column[col]
+                .iter()
+                .filter_map(|&i| match self.notes[i].hold {
+                    HoldState::Holding { last_tap, .. } => Some((
+                        matches!(self.notes[i].note.kind, NoteKind::RollHead { .. }),
+                        last_tap,
+                    )),
+                    _ => None,
+                })
+                .collect();
+            if active.is_empty() {
+                if self.pressed[col] {
+                    self.release(column, t);
+                }
+            } else if active.iter().any(|(roll, last)| *roll && t - last > 0.1) {
+                // Rolls need repeated taps.
+                self.release(column, t);
+                self.press(column, t);
+            }
+        }
+    }
+
     /// Advances the game to song time `t`: misses, hold results and mines.
     pub fn update(&mut self, t: f64) {
         let window = miss_window(self.judge_scale);
@@ -404,5 +445,31 @@ mod tests {
         g.update(10.0);
         assert_eq!(g.score.percent(), 100.0);
         assert_eq!(g.score.max_combo, 8);
+    }
+
+    #[test]
+    fn autoplay_clears_everything() {
+        let notes = vec![
+            note(1.0, 0, NoteKind::Tap),
+            note(1.0, 3, NoteKind::Tap),
+            note(1.5, 1, NoteKind::HoldHead { end_beat: 2.5 }),
+            note(1.6, 2, NoteKind::RollHead { end_beat: 2.8 }),
+            note(2.0, 0, NoteKind::Mine),
+            note(3.0, 1, NoteKind::Tap),
+        ];
+        let mut g = GameSession::new(notes, 4, 1.0);
+        let mut t = 0.0;
+        while t < 4.0 {
+            t += 1.0 / 60.0;
+            g.autoplay(t);
+            g.update(t);
+        }
+        assert_eq!(g.score.counts[Judgment::Marvelous.index()], 5);
+        assert_eq!(g.score.counts[Judgment::Miss.index()], 0);
+        assert_eq!(
+            (g.score.holds_ok, g.score.holds_ng, g.score.mines_hit),
+            (2, 0, 0)
+        );
+        assert!((g.score.percent() - 100.0).abs() < 1e-9);
     }
 }

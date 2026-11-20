@@ -228,7 +228,9 @@ impl GameplayScreen {
 
         // Auto-pause when the window loses focus or a mat is unplugged.
         let focused = ui.ctx().input(|i| i.viewport().focused).unwrap_or(true);
-        if (!focused || shared.gamepad_disconnected) && self.pause.is_none() {
+        // (AutoPlay keeps running in the background: nobody is playing.)
+        let lost_focus = !focused && !shared.autoplay;
+        if (lost_focus || shared.gamepad_disconnected) && self.pause.is_none() {
             self.set_paused(true, now);
         }
         shared.gamepad_disconnected = false;
@@ -259,6 +261,9 @@ impl GameplayScreen {
                         self.session.release(ev.column, t);
                     }
                 }
+            }
+            if shared.autoplay {
+                self.session.autoplay(self.song_time);
             }
             self.session.update(self.song_time);
             self.handle_events(now);
@@ -371,7 +376,7 @@ impl GameplayScreen {
         }
 
         self.draw_judgment(&painter, &layout, rect, now, reduce);
-        self.draw_hud(&painter, rect, &layout, shared);
+        self.draw_hud(&painter, rect, shared);
 
         if self.song_time < 0.0 && self.pause.is_none() {
             let left = (-self.song_time).ceil() as i32;
@@ -455,7 +460,7 @@ impl GameplayScreen {
         }
     }
 
-    fn draw_hud(&self, painter: &egui::Painter, rect: Rect, layout: &Layout, shared: &Shared) {
+    fn draw_hud(&self, painter: &egui::Painter, rect: Rect, shared: &Shared) {
         let palette = &shared.palette;
         // song progress
         let progress = (self.song_time / self.song_length.max(1.0)).clamp(0.0, 1.0) as f32;
@@ -463,15 +468,25 @@ impl GameplayScreen {
         widgets::progress_bar(painter, bar, progress, palette);
         self.draw_score_bar(painter, rect);
 
+        self.draw_life_bar(painter, rect, shared.settings.no_fail);
+        if shared.autoplay {
+            painter.text(
+                rect.center_bottom() - vec2(0.0, 24.0),
+                Align2::CENTER_CENTER,
+                "AUTOPLAY",
+                font_bold(theme::TEXT_S),
+                theme::ACCENT_B.gamma_multiply(0.8),
+            );
+        }
         painter.text(
-            rect.left_top() + vec2(24.0, 24.0),
+            rect.left_top() + vec2(24.0, 58.0),
             Align2::LEFT_TOP,
             &self.title,
             font_bold(theme::TEXT_M),
             Color32::WHITE.gamma_multiply(0.8),
         );
         painter.text(
-            rect.left_top() + vec2(24.0, 48.0),
+            rect.left_top() + vec2(24.0, 82.0),
             Align2::LEFT_TOP,
             &self.subtitle,
             font(theme::TEXT_S),
@@ -480,29 +495,12 @@ impl GameplayScreen {
 
         widgets::tabular_text(
             painter,
-            rect.right_top() + vec2(-24.0, 24.0),
+            rect.right_top() + vec2(-24.0, 16.0),
             Align2::RIGHT_TOP,
-            &format!("{:.2}%", self.session.score.percent()),
+            &format!("{:.2}%", self.session.score.accuracy_percent()),
             font_bold(theme::TEXT_L),
             Color32::WHITE.gamma_multiply(0.85),
         );
-
-        // life bar next to the notefield
-        let x = layout.left + layout.width(self.columns) + 28.0;
-        let h = rect.height() * 0.5;
-        let life_rect = Rect::from_min_size(pos2(x, rect.center().y - h / 2.0), vec2(6.0, h));
-        painter.rect_filled(life_rect, 3, Color32::from_white_alpha(20));
-        let life = self.session.score.life;
-        let fill = Rect::from_min_max(
-            pos2(life_rect.left(), life_rect.bottom() - h * life),
-            life_rect.max,
-        );
-        let color = if life < 0.25 {
-            theme::DANGER
-        } else {
-            theme::SUCCESS
-        };
-        painter.rect_filled(fill, 3, color.gamma_multiply(0.85));
 
         if shared.settings.show_fps {
             let dt = painter.ctx().input(|i| i.unstable_dt).max(1e-4);
@@ -516,48 +514,135 @@ impl GameplayScreen {
         }
     }
 
+    /// StepMania-style life bar in the top-left corner: segmented, red → yellow →
+    /// green, pulsing red when nearly empty. Rises on good steps, drops on misses.
+    fn draw_life_bar(&self, painter: &egui::Painter, rect: Rect, no_fail: bool) {
+        const SEGMENTS: usize = 24;
+        let score = &self.session.score;
+        let life = score.life.clamp(0.0, 1.0);
+        let frame = Rect::from_min_size(rect.left_top() + vec2(24.0, 16.0), vec2(300.0, 22.0));
+        painter.text(
+            frame.left_center() + vec2(0.0, 0.0),
+            Align2::LEFT_CENTER,
+            "LIFE",
+            font_bold(theme::TEXT_XS),
+            Color32::WHITE.gamma_multiply(0.7),
+        );
+        let bar = Rect::from_min_max(frame.min + vec2(40.0, 0.0), frame.max);
+        let danger = life < 0.25;
+        let t = painter.ctx().input(|i| i.time) as f32;
+        let pulse = if danger {
+            0.5 + 0.5 * (t * 8.0).sin()
+        } else {
+            0.0
+        };
+        painter.rect_filled(bar.expand(3.0), 6, Color32::from_black_alpha(120));
+        painter.rect_stroke(
+            bar.expand(3.0),
+            6,
+            egui::Stroke::new(
+                1.0,
+                theme::DANGER
+                    .gamma_multiply(0.2 + 0.6 * pulse)
+                    .lerp_to_gamma(Color32::from_white_alpha(40), 1.0 - pulse),
+            ),
+            egui::StrokeKind::Inside,
+        );
+        let yellow = Color32::from_rgb(0xFF, 0xE4, 0x5C);
+        let color = if life < 0.5 {
+            theme::DANGER.lerp_to_gamma(yellow, life / 0.5)
+        } else {
+            yellow.lerp_to_gamma(theme::SUCCESS, (life - 0.5) / 0.5)
+        };
+        let gap = 2.0;
+        let seg_w = (bar.width() - gap * (SEGMENTS as f32 - 1.0)) / SEGMENTS as f32;
+        for i in 0..SEGMENTS {
+            let x = bar.left() + i as f32 * (seg_w + gap);
+            let seg = Rect::from_min_size(pos2(x, bar.top()), vec2(seg_w, bar.height()));
+            painter.rect_filled(seg, 2, Color32::from_white_alpha(14));
+            // How much of this segment is filled (0..=1).
+            let fill = (life * SEGMENTS as f32 - i as f32).clamp(0.0, 1.0);
+            if fill > 0.0 {
+                let r = Rect::from_min_size(seg.min, vec2(seg_w * fill, seg.height()));
+                let shade = if i == SEGMENTS - 1 || life >= 1.0 {
+                    color.lerp_to_gamma(Color32::WHITE, 0.25)
+                } else {
+                    color
+                };
+                painter.rect_filled(r, 2, shade.gamma_multiply(0.75 + 0.25 * pulse));
+            }
+        }
+        if no_fail {
+            painter.text(
+                bar.right_center() + vec2(12.0, 0.0),
+                Align2::LEFT_CENTER,
+                if score.failed {
+                    "No Fail · habis"
+                } else {
+                    "No Fail"
+                },
+                font(theme::TEXT_XS),
+                Color32::WHITE.gamma_multiply(0.45),
+            );
+        }
+    }
+
     /// Score bar under the song progress: bright = points earned, dim = the best
     /// percentage still reachable, ticks = grade thresholds.
     fn draw_score_bar(&self, painter: &egui::Painter, rect: Rect) {
-        let width = (rect.width() * 0.36).clamp(240.0, 520.0);
-        let bar =
-            Rect::from_center_size(pos2(rect.center().x, rect.top() + 22.0), vec2(width, 10.0));
+        // Top-right, under the accuracy; mirrors the life bar on the left.
+        let bar = Rect::from_min_size(
+            pos2(rect.right() - 24.0 - 300.0, rect.top() + 62.0),
+            vec2(300.0, 10.0),
+        );
         let score = &self.session.score;
         let earned = (score.percent() / 100.0) as f32;
         let possible = (score.max_possible_percent() / 100.0) as f32;
-        painter.rect_filled(bar, theme::RADIUS_PILL, Color32::from_white_alpha(16));
+        painter.text(
+            bar.left_center() - vec2(10.0, 0.0),
+            Align2::RIGHT_CENTER,
+            "SKOR",
+            font_bold(theme::TEXT_XS),
+            Color32::WHITE.gamma_multiply(0.7),
+        );
+        painter.rect_filled(
+            bar.expand(2.0),
+            theme::RADIUS_PILL,
+            Color32::from_black_alpha(120),
+        );
+        painter.rect_filled(bar, theme::RADIUS_PILL, Color32::from_white_alpha(10));
         let part = |v: f32| {
             Rect::from_min_size(bar.min, vec2(bar.width() * v.clamp(0.0, 1.0), bar.height()))
         };
+        // Still reachable: a clearly visible, softer version of the accent.
         painter.rect_filled(
             part(possible),
             theme::RADIUS_PILL,
-            Color32::from_white_alpha(28),
+            theme::ACCENT_B.gamma_multiply(0.22),
         );
         if earned > 0.0 {
             widgets::gradient_pill(painter, part(earned), theme::ACCENT_A, theme::ACCENT_B);
         }
-        for (pct, grade) in [
-            (0.7, "C"),
-            (0.8, "B"),
-            (0.9, "A"),
-            (0.95, "S"),
-            (0.99, "SS"),
+        // Grade thresholds; S and SS are close, so SS is labelled above the bar.
+        for (pct, grade, above) in [
+            (0.8, "B", false),
+            (0.9, "A", false),
+            (0.95, "S", false),
+            (0.99, "SS", true),
         ] {
             let x = bar.left() + bar.width() * pct;
             let reachable = possible >= pct;
-            let color = Color32::WHITE.gamma_multiply(if reachable { 0.55 } else { 0.18 });
+            let color = Color32::WHITE.gamma_multiply(if reachable { 0.6 } else { 0.18 });
             painter.line_segment(
                 [pos2(x, bar.top() - 2.0), pos2(x, bar.bottom() + 2.0)],
                 egui::Stroke::new(1.0, color),
             );
-            painter.text(
-                pos2(x, bar.bottom() + 4.0),
-                Align2::CENTER_TOP,
-                grade,
-                font(theme::TEXT_XS - 2.0),
-                color,
-            );
+            let (pos, align) = if above {
+                (pos2(x, bar.top() - 4.0), Align2::CENTER_BOTTOM)
+            } else {
+                (pos2(x, bar.bottom() + 4.0), Align2::CENTER_TOP)
+            };
+            painter.text(pos, align, grade, font(theme::TEXT_XS - 2.0), color);
         }
     }
 

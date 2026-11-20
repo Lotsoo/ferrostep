@@ -124,6 +124,15 @@ Di sesi Wayland, zona impor otomatis berganti teks "Klik untuk memilih file" (di
 - Di bawah bar progres lagu: bar skor (terang = poin didapat, redup = persentase maksimum yang masih mungkin),
   penanda grade C/B/A/S/SS yang meredup bila sudah tidak terjangkau. `Score::max_possible_percent` + test.
 
+### Tambahan — HUD gameplay (permintaan pengguna)
+- **Life bar** horizontal bersegmen di kiri atas (merah → kuning → hijau, berdenyut merah saat < 25 %,
+  label "No Fail"). Menggantikan bar vertikal tipis.
+- Angka kanan atas = **akurasi saat ini** (mulai 100 %, gaya Etterna); sama dengan skor final di akhir lagu.
+- **Bar skor** di bawahnya: poin terkumpul + area "masih bisa dicapai" + penanda B/A/S/SS.
+- Alat developer: `--play <folder>`, `--chart <n>`, `--autoplay` (`GameSession::autoplay`, teruji: tap, hold,
+  roll, mine → 100 %). AutoPlay tidak menyimpan skor dan tidak dijeda saat jendela kehilangan fokus.
+- Diverifikasi lewat screenshot jendela (X11) saat autoplay lagu impor 4 menit.
+
 ### Fase 8 — Packaging & rilis (selesai; RPM dibuat oleh pengguna/CI)
 - Versi 0.1.0, lisensi **MIT** ("Ferrostep contributors") — *perlu dikonfirmasi pemilik*.
 - Ikon orisinal (SVG + PNG 32–256), ikon jendela, `packaging/ferrostep.desktop` (lolos desktop-file-validate).
@@ -138,8 +147,7 @@ Di sesi Wayland, zona impor otomatis berganti teks "Klik untuk memilih file" (di
 - Pengguna: uji di Windows 11 (zip dari CI atau `cargo build --release`), uji dance mat sungguhan
   (evtest → wizard → main), uji GNOME, uji FPS gameplay di monitor 120 Hz+.
 - Konfirmasi lisensi (MIT?) dan nama pemegang hak cipta.
-- Ide yt-dlp "impor dari URL": ditunda, keputusan di tangan pengguna (lihat diskusi: risiko ToS, rapuh;
-  bila jadi, opsional seperti ffmpeg dan tidak dibundel).
+- Ide yt-dlp/streaming YouTube: **ditolak pengguna** (2026-11-21). Jangan dikerjakan kecuali diminta lagi.
 - Fase lanjut: BPM bervariasi, video latar MP4, editor chart, mode latihan, statistik riwayat,
   ikon .exe Windows (winres), AppImage.
 - Drag-and-drop di Wayland menunggu dukungan winit.
