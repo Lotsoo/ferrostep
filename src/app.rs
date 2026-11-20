@@ -12,6 +12,7 @@ use crate::input::{FrameInput, InputHub};
 use crate::library::scores::{BestScore, ScoreStore, chart_key};
 use crate::library::{Library, songs_dir, test_song};
 use crate::ui::screens::gameplay::GameplayScreen;
+use crate::ui::screens::import::ImportScreen;
 use crate::ui::screens::pad_setup::PadSetupScreen;
 use crate::ui::screens::results::ResultsScreen;
 use crate::ui::screens::song_select::SongSelectScreen;
@@ -66,6 +67,7 @@ impl Shared {
 enum Screen {
     Title(TitleScreen),
     SongSelect(Box<SongSelectScreen>),
+    Import(Box<ImportScreen>),
     Gameplay(Box<GameplayScreen>),
     Results(Box<ResultsScreen>),
     PadSetup(Box<PadSetupScreen>),
@@ -135,7 +137,14 @@ impl FerrostepApp {
         let next = match nav {
             Nav::Title => Screen::Title(TitleScreen::default()),
             Nav::SongSelect => Screen::SongSelect(Box::default()),
-            Nav::Import(_) | Nav::Settings => {
+            Nav::Import(files) => {
+                if let Screen::Import(s) = &mut self.screen {
+                    s.enqueue(files);
+                    return;
+                }
+                Screen::Import(Box::new(ImportScreen::new(files, &self.shared)))
+            }
+            Nav::Settings => {
                 self.shared.toasts.info("Segera hadir.");
                 return;
             }
@@ -227,11 +236,67 @@ impl FerrostepApp {
         nav
     }
 
+    /// Files dropped on the window open the import screen (from any screen but gameplay).
+    fn handle_dropped_files(&mut self, ui: &egui::Ui, ctx: &egui::Context) -> Option<Nav> {
+        let (hovered, dropped) = ctx.input(|i| {
+            let dropped: Vec<std::path::PathBuf> = i
+                .raw
+                .dropped_files
+                .iter()
+                .map(|f| f.path().to_path_buf())
+                .collect();
+            (!i.raw.hovered_files.is_empty(), dropped)
+        });
+        let in_game = matches!(self.screen, Screen::Gameplay(_));
+        if hovered && !in_game {
+            let rect = ui.max_rect();
+            let painter = ui.ctx().layer_painter(egui::LayerId::new(
+                egui::Order::Foreground,
+                egui::Id::unique("drop-overlay"),
+            ));
+            painter.rect_filled(rect, 0, Color32::from_black_alpha(170));
+            painter.rect_stroke(
+                rect.shrink(16.0),
+                theme::RADIUS_CARD,
+                egui::Stroke::new(3.0, theme::ACCENT_B),
+                egui::StrokeKind::Inside,
+            );
+            painter.text(
+                rect.center(),
+                egui::Align2::CENTER_CENTER,
+                "Lepaskan untuk mengimpor",
+                theme::font_bold(theme::TEXT_XL),
+                Color32::WHITE,
+            );
+        }
+        if dropped.is_empty() {
+            return None;
+        }
+        let files: Vec<_> = dropped
+            .into_iter()
+            .filter(|p| crate::importer::is_importable(p))
+            .collect();
+        if files.is_empty() {
+            self.shared
+                .toasts
+                .warning("Hanya file MP3, MP4, M4A, OGG, WAV, atau FLAC yang bisa diimpor.");
+            None
+        } else if in_game {
+            self.shared
+                .toasts
+                .info("Selesaikan lagu dulu, lalu seret file lagi untuk mengimpor.");
+            None
+        } else {
+            Some(Nav::Import(files))
+        }
+    }
+
     fn screen_ui(&mut self, ui: &mut egui::Ui, input: &FrameInput) -> Option<Nav> {
         let shared = &mut self.shared;
         match &mut self.screen {
             Screen::Title(s) => s.ui(ui, shared, input),
             Screen::SongSelect(s) => s.ui(ui, shared, input),
+            Screen::Import(s) => s.ui(ui, shared, input),
             Screen::Gameplay(s) => s.ui(ui, shared, input),
             Screen::Results(s) => s.ui(ui, shared, input),
             Screen::PadSetup(s) => s.ui(ui, shared, input),
@@ -283,7 +348,11 @@ impl eframe::App for FerrostepApp {
             ctx.request_repaint();
         }
 
-        nav = nav.or_else(|| self.shared.pending_nav.take()).or(pad_nav);
+        let drop_nav = self.handle_dropped_files(ui, &ctx);
+        nav = nav
+            .or_else(|| self.shared.pending_nav.take())
+            .or(pad_nav)
+            .or(drop_nav);
         if let Some(nav) = nav {
             self.navigate(&ctx, nav);
         }

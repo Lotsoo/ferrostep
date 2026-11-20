@@ -147,6 +147,11 @@ fn subdirs(dir: &Path) -> Vec<PathBuf> {
         .flatten()
         .map(|e| e.path())
         .filter(|p| p.is_dir())
+        // Hidden folders (e.g. the importer's work folder) are not songs.
+        .filter(|p| {
+            !p.file_name()
+                .is_some_and(|n| n.to_string_lossy().starts_with('.'))
+        })
         .collect();
     dirs.sort();
     dirs

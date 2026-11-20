@@ -158,6 +158,23 @@ pub fn decode_file(
     })
 }
 
+/// Reads only the title/artist tags of a file (no decoding).
+pub fn read_file_tags(path: &Path) -> Result<(Option<String>, Option<String>)> {
+    let file = File::open(path)?;
+    let mss = MediaSourceStream::new(Box::new(file), Default::default());
+    let mut hint = Hint::new();
+    if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+        hint.with_extension(ext);
+    }
+    let mut format = symphonia::default::get_probe().probe(
+        &hint,
+        mss,
+        FormatOptions::default(),
+        MetadataOptions::default(),
+    )?;
+    Ok(read_tags(&mut format.metadata()))
+}
+
 fn read_tags(meta: &mut symphonia::core::meta::Metadata<'_>) -> (Option<String>, Option<String>) {
     let (mut title, mut artist) = (None, None);
     if let Some(rev) = meta.skip_to_latest() {

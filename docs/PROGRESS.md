@@ -68,3 +68,22 @@
 - Hasil test sintetis: 128/140/95,5 BPM klik dan drum 120 BPM → BPM tepat (±0,01), error fase ≤ 5 ms.
 - Pelajaran: hi-hat/noise mendominasi flux total sehingga kick hilang → onset dipilih dari fungsi deteksi
   seimbang (½ flux total + ½ flux pita rendah), fase memakai bobot pita rendah.
+
+### Fase 5 — chart_gen + importer (selesai)
+- `chart_gen`: kuantisasi onset ke grid per difficulty, seleksi berdasarkan skor dengan batas NPS & jarak minimum,
+  model kaki (kiri: L/D/U, kanan: D/U/R, bergantian → tanpa crossover), batas jack ≤ 2 dari model,
+  jump hanya di beat kuat (tidak di Beginner), hold hanya Medium/Hard (satu hold sekaligus), tanpa note di 1 detik pertama,
+  meter 1–10 dari NPS rata-rata + puncak, RNG ChaCha8 di-seed hash FNV-1a file (deterministik).
+  Property test: 25 seed acak × 4 difficulty tanpa pelanggaran aturan ergonomis.
+- `importer`: thread latar, 5 tahap, batal via AtomicBool, ditulis ke folder `.import-*` lalu di-rename (tidak ada
+  lagu setengah jadi), nama folder disanitasi + sufiks ` (2)`. MP3/OGG/WAV/FLAC disalin; MP4/M4A/AAC → `.ogg` via
+  ffmpeg (config → folder exe → PATH), fallback `.wav`. Koreksi BPM ×2/÷2/manual menulis ulang chart.
+- Layar Import: zona drop, stepper animasi, progress bar, waveform, kartu hasil (BPM, 4 chart + meter + langkah),
+  "Mainkan Sekarang", antrean banyak file. Drop file di layar mana pun → Import; overlay "Lepaskan untuk mengimpor".
+- Ukuran (build release, laptop dev): MP3 4 menit → 0,4 s; MP4 4 menit dengan ffmpeg → 2,3 s; tanpa ffmpeg → 0,5 s.
+  Target < 30 s tercapai jauh.
+- Pelajaran: decoder AAC berbeda soal pemangkasan *encoder delay* (~21 ms). Karena itu bila ffmpeg dipakai,
+  analisis dilakukan pada `.ogg` hasil konversi, bukan file sumber, agar offset cocok dengan audio yang diputar.
+
+**Keterbatasan diketahui:** winit 0.30 belum mendukung drag-and-drop file di **Wayland** (hanya X11/Windows/macOS).
+Di sesi Wayland, zona impor otomatis berganti teks "Klik untuk memilih file" (dialog lewat XDG portal via `rfd`).

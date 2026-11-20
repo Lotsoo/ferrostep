@@ -4,8 +4,10 @@
 pub mod app;
 pub mod audio;
 pub mod audio_dsp;
+pub mod chart_gen;
 pub mod config;
 pub mod gameplay;
+pub mod importer;
 pub mod input;
 pub mod library;
 pub mod parser;

@@ -1,6 +1,7 @@
 //! Screens and navigation between them.
 
 pub mod gameplay;
+pub mod import;
 pub mod pad_setup;
 pub mod results;
 pub mod song_select;
