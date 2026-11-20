@@ -13,8 +13,10 @@ use crate::library::scores::{BestScore, ScoreStore, chart_key};
 use crate::library::{Library, songs_dir, test_song};
 use crate::ui::screens::gameplay::GameplayScreen;
 use crate::ui::screens::import::ImportScreen;
+use crate::ui::screens::onboarding::OnboardingScreen;
 use crate::ui::screens::pad_setup::PadSetupScreen;
 use crate::ui::screens::results::ResultsScreen;
+use crate::ui::screens::settings::SettingsScreen;
 use crate::ui::screens::song_select::SongSelectScreen;
 use crate::ui::screens::title::TitleScreen;
 use crate::ui::screens::{Nav, ResultData};
@@ -42,6 +44,10 @@ pub struct Shared {
     pub pending_nav: Option<Nav>,
     /// Profile finished by the mapping wizard, saved by the app.
     pub save_pad_profile: Option<(String, DeviceProfile)>,
+    /// Connected gamepads / dance mats: (profile key, name).
+    pub connected_pads: Vec<(String, String)>,
+    /// Theme and UI scale currently applied to egui.
+    applied_look: (crate::config::ThemeChoice, f32),
 }
 
 impl Shared {
@@ -65,9 +71,11 @@ impl Shared {
 
 /// The current screen.
 enum Screen {
-    Title(TitleScreen),
+    Title(Box<TitleScreen>),
     SongSelect(Box<SongSelectScreen>),
     Import(Box<ImportScreen>),
+    Settings(Box<SettingsScreen>),
+    Onboarding(Box<OnboardingScreen>),
     Gameplay(Box<GameplayScreen>),
     Results(Box<ResultsScreen>),
     PadSetup(Box<PadSetupScreen>),
@@ -110,6 +118,12 @@ impl FerrostepApp {
         }
         log::info!("songs folder: {}", root.display());
 
+        let (settings_theme, settings_scale) = (settings.theme, settings.ui_scale);
+        let first_screen = if settings.onboarding_done {
+            Screen::Title(Box::default())
+        } else {
+            Screen::Onboarding(Box::default())
+        };
         let now = Instant::now();
         Self {
             shared: Shared {
@@ -126,16 +140,22 @@ impl FerrostepApp {
                 gamepad_disconnected: false,
                 pending_nav: None,
                 save_pad_profile: None,
+                connected_pads: Vec::new(),
+                applied_look: (settings_theme, settings_scale),
             },
             input: InputHub::new(&cc.egui_ctx),
-            screen: Screen::Title(TitleScreen::default()),
+            screen: first_screen,
             transition_start: now,
         }
     }
 
     fn navigate(&mut self, ctx: &egui::Context, nav: Nav) {
+        // Leaving onboarding in any way (finished, skipped, mat wizard) completes it.
+        if matches!(self.screen, Screen::Onboarding(_)) {
+            self.shared.settings.onboarding_done = true;
+        }
         let next = match nav {
-            Nav::Title => Screen::Title(TitleScreen::default()),
+            Nav::Title => Screen::Title(Box::default()),
             Nav::SongSelect => Screen::SongSelect(Box::default()),
             Nav::Import(files) => {
                 if let Screen::Import(s) = &mut self.screen {
@@ -144,10 +164,7 @@ impl FerrostepApp {
                 }
                 Screen::Import(Box::new(ImportScreen::new(files, &self.shared)))
             }
-            Nav::Settings => {
-                self.shared.toasts.info("Segera hadir.");
-                return;
-            }
+            Nav::Settings => Screen::Settings(Box::new(SettingsScreen::new(None))),
             Nav::PadSetup {
                 key,
                 name,
@@ -230,10 +247,21 @@ impl FerrostepApp {
             }
         }
         self.shared.gamepad_name = self.input.gamepads.first_name();
+        self.shared.connected_pads = self.input.gamepads.connected();
         if let Some((key, profile)) = self.shared.save_pad_profile.take() {
             self.input.gamepads.save_profile(key, profile);
         }
         nav
+    }
+
+    /// Re-applies theme and UI scale after they change in Settings.
+    fn apply_look(&mut self, ctx: &egui::Context) {
+        let wanted = (self.shared.settings.theme, self.shared.settings.ui_scale);
+        if wanted != self.shared.applied_look {
+            self.shared.palette = Palette::for_choice(wanted.0);
+            theme::apply(ctx, &self.shared.palette, wanted.1);
+            self.shared.applied_look = wanted;
+        }
     }
 
     /// Files dropped on the window open the import screen (from any screen but gameplay).
@@ -297,6 +325,8 @@ impl FerrostepApp {
             Screen::Title(s) => s.ui(ui, shared, input),
             Screen::SongSelect(s) => s.ui(ui, shared, input),
             Screen::Import(s) => s.ui(ui, shared, input),
+            Screen::Settings(s) => s.ui(ui, shared, input),
+            Screen::Onboarding(s) => s.ui(ui, shared, input),
             Screen::Gameplay(s) => s.ui(ui, shared, input),
             Screen::Results(s) => s.ui(ui, shared, input),
             Screen::PadSetup(s) => s.ui(ui, shared, input),
@@ -312,6 +342,7 @@ impl eframe::App for FerrostepApp {
         let full = ui.max_rect();
         let reduce = self.shared.settings.reduce_motion;
         self.shared.library.poll(now);
+        self.apply_look(&ctx);
         let pad_nav = self.handle_pad_events(&input);
 
         if !matches!(self.screen, Screen::Gameplay(_)) {

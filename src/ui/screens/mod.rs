@@ -1,9 +1,12 @@
 //! Screens and navigation between them.
 
+pub mod calibration;
 pub mod gameplay;
 pub mod import;
+pub mod onboarding;
 pub mod pad_setup;
 pub mod results;
+pub mod settings;
 pub mod song_select;
 pub mod title;
 

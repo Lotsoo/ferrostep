@@ -37,6 +37,8 @@ fn tween_ms(ms: u64) -> Tween {
 /// A playing song (or preview).
 pub struct Music {
     handle: StreamingSoundHandle<FromFileError>,
+    /// A fade-out was requested; dropping must not cut it short.
+    fading: bool,
 }
 
 impl Music {
@@ -61,12 +63,15 @@ impl Music {
     /// Fades out over `ms` milliseconds, then stops.
     pub fn fade_out(&mut self, ms: u64) {
         self.handle.stop(tween_ms(ms));
+        self.fading = true;
     }
 }
 
 impl Drop for Music {
     fn drop(&mut self) {
-        self.handle.stop(tween_ms(30));
+        if !self.fading {
+            self.handle.stop(tween_ms(30));
+        }
     }
 }
 
@@ -106,7 +111,10 @@ impl Audio {
             data = data.fade_in_tween(tween_ms(fade_in_ms));
         }
         let handle = self.manager.play(data).map_err(|e| anyhow!("{e}"))?;
-        Ok(Music { handle })
+        Ok(Music {
+            handle,
+            fading: false,
+        })
     }
 
     /// Plays a metronome click (used by the calibration wizard).

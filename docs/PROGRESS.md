@@ -87,3 +87,18 @@
 
 **Keterbatasan diketahui:** winit 0.30 belum mendukung drag-and-drop file di **Wayland** (hanya X11/Windows/macOS).
 Di sesi Wayland, zona impor otomatis berganti teks "Klik untuk memilih file" (dialog lewat XDG portal via `rfd`).
+
+### Fase 6 — Settings, kalibrasi, onboarding, polish (selesai)
+- Layar **Pengaturan** dengan sidebar (Gameplay, Audio, Tampilan, Kontrol, Folder), tersimpan otomatis:
+  CMod/XMod + kecepatan, reverse, tingkat penilaian (Longgar/Normal/Ketat), No Fail, kecerahan latar, volume,
+  global offset (slider ±5), tema gelap/terang & skala UI (langsung diterapkan), kurangi animasi, FPS,
+  VSync & backend grafis (berlaku setelah restart), **keybind** (klik → tekan tombol, klik kanan hapus, default),
+  uji panel live, daftar dance mat + "Atur ulang dance mat", debounce, panduan "Dance mat tidak terbaca?" per OS,
+  folder lagu (buka/ganti/default/pindai ulang), ffmpeg (status/pilih/otomatis).
+- **Wizard kalibrasi offset** (`calibration.rs`): metronom 100 BPM, 4 ketukan hitung-masuk, 16 ketukan,
+  statistik robust (buang 10 % terburuk), usulan offset + kestabilan. Dipakai di Settings dan onboarding.
+- **Onboarding pertama kali**: Kontrol (panah menyala saat ditekan, status mat) → Kalibrasi (bisa dilewati)
+  → Mainkan lagu contoh / Impor lagu pertama. "Lewati semua" selalu ada.
+- **Layar judul**: memutar preview lagu acak dari library (lagu nyata diutamakan), cincin berdenyut mengikuti
+  beat lagu yang sebenarnya (via TimingMap), label "♪ judul — artis".
+- Perbaikan: `Music::fade_out` kini tidak terpotong saat objek di-drop (preview Song Select ikut lebih halus).

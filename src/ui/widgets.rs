@@ -342,3 +342,76 @@ pub fn color_from_hash(text: &str) -> Color32 {
     let hsva = egui::ecolor::Hsva::new(hue, 0.65, 0.95, 1.0);
     Color32::from(hsva)
 }
+
+/// iOS-style on/off switch. Returns true when it was toggled.
+pub fn toggle(ui: &mut Ui, on: &mut bool) -> bool {
+    let (rect, response) = ui.allocate_exact_size(vec2(48.0, 28.0), Sense::click());
+    if response.clicked() {
+        *on = !*on;
+    }
+    let t = ui.ctx().animate_bool_with_time(response.id, *on, 0.15);
+    let painter = ui.painter();
+    let off_color = Color32::from_gray(90);
+    painter.rect_filled(
+        rect,
+        theme::RADIUS_PILL,
+        off_color.lerp_to_gamma(ACCENT_A, t),
+    );
+    let knob = pos2(rect.left() + 14.0 + t * 20.0, rect.center().y);
+    painter.circle_filled(
+        knob,
+        10.0 + if response.hovered() { 1.0 } else { 0.0 },
+        Color32::WHITE,
+    );
+    response.clicked()
+}
+
+/// Row of mutually exclusive options. Returns true when the selection changed.
+pub fn segmented(ui: &mut Ui, palette: &Palette, options: &[&str], selected: &mut usize) -> bool {
+    let mut changed = false;
+    let galleys: Vec<_> = options
+        .iter()
+        .map(|o| {
+            ui.painter()
+                .layout_no_wrap((*o).to_string(), font(theme::TEXT_S), palette.text)
+        })
+        .collect();
+    let widths: Vec<f32> = galleys.iter().map(|g| g.size().x + 28.0).collect();
+    let total: f32 = widths.iter().sum::<f32>() + 8.0;
+    let (rect, _) = ui.allocate_exact_size(vec2(total, 36.0), Sense::hover());
+    ui.painter()
+        .rect_filled(rect, RADIUS_BUTTON, palette.surface_hover);
+    let mut x = rect.left() + 4.0;
+    for (i, (opt, w)) in options.iter().zip(&widths).enumerate() {
+        let r = Rect::from_min_size(pos2(x, rect.top() + 4.0), vec2(*w, 28.0));
+        let resp = ui.interact(r, ui.scope_id().with(("segmented", i)), Sense::click());
+        if resp.clicked() && *selected != i {
+            *selected = i;
+            changed = true;
+        }
+        let active = *selected == i;
+        if active {
+            gradient_rect(ui.painter(), r, ACCENT_A, ACCENT_B);
+        } else if resp.hovered() {
+            ui.painter()
+                .rect_filled(r, RADIUS_BUTTON - 4, palette.surface);
+        }
+        ui.painter().text(
+            r.center(),
+            Align2::CENTER_CENTER,
+            *opt,
+            if active {
+                font_bold(theme::TEXT_S)
+            } else {
+                font(theme::TEXT_S)
+            },
+            if active {
+                Color32::WHITE
+            } else {
+                palette.text_dim
+            },
+        );
+        x += w;
+    }
+    changed
+}

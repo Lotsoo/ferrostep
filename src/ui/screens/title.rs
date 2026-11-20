@@ -6,7 +6,9 @@ use eframe::egui::{self, Align2, Color32, Rect, Stroke, Ui, pos2, vec2};
 
 use super::Nav;
 use crate::app::Shared;
+use crate::audio::Music;
 use crate::input::{FrameInput, MenuAction};
+use crate::timing::TimingMap;
 use crate::ui::theme::{self, ACCENT_A, ACCENT_B, font, font_bold};
 use crate::ui::{anim, widgets};
 
@@ -19,9 +21,18 @@ const ITEMS: [(&str, &str); 3] = [
 /// Visual tempo of the title animation.
 const TITLE_BPM: f32 = 110.0;
 
+/// Background music on the title screen: a library song's preview section.
+struct TitleMusic {
+    music: Music,
+    timing: TimingMap,
+    label: String,
+}
+
 pub struct TitleScreen {
     selected: usize,
     opened: Instant,
+    music: Option<TitleMusic>,
+    music_tried: bool,
 }
 
 impl Default for TitleScreen {
@@ -29,11 +40,71 @@ impl Default for TitleScreen {
         Self {
             selected: 0,
             opened: Instant::now(),
+            music: None,
+            music_tried: false,
+        }
+    }
+}
+
+impl Drop for TitleScreen {
+    fn drop(&mut self) {
+        if let Some(m) = &mut self.music {
+            m.music.fade_out(500);
         }
     }
 }
 
 impl TitleScreen {
+    /// Starts a random song's preview once the library has loaded.
+    fn start_music(&mut self, shared: &mut Shared) {
+        if self.music_tried || !shared.library.loaded_once {
+            return;
+        }
+        self.music_tried = true;
+        let Some(audio) = &mut shared.audio else {
+            return;
+        };
+        let with_music: Vec<_> = shared
+            .library
+            .songs
+            .iter()
+            .filter(|s| s.music.is_some())
+            .collect();
+        // Prefer real songs over the generated metronome.
+        let real: Vec<_> = with_music
+            .iter()
+            .filter(|s| s.group != "_Test")
+            .copied()
+            .collect();
+        let pool = if real.is_empty() { with_music } else { real };
+        if pool.is_empty() {
+            return;
+        }
+        let pick = (std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.subsec_nanos()) as usize)
+            % pool.len();
+        let song = pool[pick];
+        let Some(path) = &song.music else { return };
+        let start = song.simfile.meta.sample_start.max(0.0);
+        match audio.play_music(path, start, 1500) {
+            Ok(music) => {
+                let artist = &song.simfile.meta.artist;
+                let label = if artist.is_empty() {
+                    song.title()
+                } else {
+                    format!("{} — {artist}", song.title())
+                };
+                self.music = Some(TitleMusic {
+                    music,
+                    timing: TimingMap::new(&song.simfile.timing),
+                    label,
+                });
+            }
+            Err(e) => log::warn!("title music: {e:#}"),
+        }
+    }
+
     fn choose(&self, i: usize) -> Nav {
         match i {
             0 => Nav::SongSelect,
@@ -57,6 +128,7 @@ impl TitleScreen {
             }
         }
 
+        self.start_music(shared);
         let rect = ui.max_rect();
         let painter = ui.painter().clone();
         let palette = shared.palette;
@@ -67,7 +139,14 @@ impl TitleScreen {
         };
 
         // Pulsing rings around the logo, on the beat.
-        let beat = t * TITLE_BPM / 60.0;
+        // Follow the music's real beat when it plays, otherwise a calm default tempo.
+        let beat = match &self.music {
+            Some(m) if !m.music.is_stopped() => m
+                .timing
+                .seconds_to_beat(m.music.position() - shared.settings.global_offset())
+                as f32,
+            _ => t * TITLE_BPM / 60.0,
+        };
         let logo_center = pos2(rect.left() + rect.width() * 0.32, rect.center().y - 20.0);
         if !reduce {
             for k in 0..3 {
@@ -141,6 +220,17 @@ impl TitleScreen {
             font(theme::TEXT_XS),
             palette.text_dim,
         );
+        if let Some(m) = &self.music
+            && !m.music.is_stopped()
+        {
+            painter.text(
+                rect.left_bottom() + vec2(24.0, -28.0),
+                Align2::LEFT_CENTER,
+                format!("♪ {}", super::song_select::truncate(&m.label, 50)),
+                font(theme::TEXT_XS),
+                palette.text_dim,
+            );
+        }
         if let Some(name) = &shared.gamepad_name {
             painter.text(
                 rect.right_top() + vec2(-24.0, 24.0),

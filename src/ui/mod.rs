@@ -114,3 +114,17 @@ impl Toasts {
         ctx.request_repaint();
     }
 }
+
+/// Opens a folder in the system file manager (Dolphin, Nautilus, Explorer, ...).
+pub fn open_in_file_manager(path: &std::path::Path) -> std::io::Result<()> {
+    #[cfg(windows)]
+    let program = "explorer";
+    #[cfg(target_os = "macos")]
+    let program = "open";
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let program = "xdg-open";
+    std::process::Command::new(program)
+        .arg(path)
+        .spawn()
+        .map(|_| ())
+}
