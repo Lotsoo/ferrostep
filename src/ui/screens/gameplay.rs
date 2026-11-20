@@ -461,6 +461,7 @@ impl GameplayScreen {
         let progress = (self.song_time / self.song_length.max(1.0)).clamp(0.0, 1.0) as f32;
         let bar = Rect::from_min_size(rect.left_top() + vec2(0.0, 0.0), vec2(rect.width(), 4.0));
         widgets::progress_bar(painter, bar, progress, palette);
+        self.draw_score_bar(painter, rect);
 
         painter.text(
             rect.left_top() + vec2(24.0, 24.0),
@@ -511,6 +512,51 @@ impl GameplayScreen {
                 format!("{:.0} FPS", 1.0 / dt),
                 font(theme::TEXT_XS),
                 Color32::WHITE.gamma_multiply(0.6),
+            );
+        }
+    }
+
+    /// Score bar under the song progress: bright = points earned, dim = the best
+    /// percentage still reachable, ticks = grade thresholds.
+    fn draw_score_bar(&self, painter: &egui::Painter, rect: Rect) {
+        let width = (rect.width() * 0.36).clamp(240.0, 520.0);
+        let bar =
+            Rect::from_center_size(pos2(rect.center().x, rect.top() + 22.0), vec2(width, 10.0));
+        let score = &self.session.score;
+        let earned = (score.percent() / 100.0) as f32;
+        let possible = (score.max_possible_percent() / 100.0) as f32;
+        painter.rect_filled(bar, theme::RADIUS_PILL, Color32::from_white_alpha(16));
+        let part = |v: f32| {
+            Rect::from_min_size(bar.min, vec2(bar.width() * v.clamp(0.0, 1.0), bar.height()))
+        };
+        painter.rect_filled(
+            part(possible),
+            theme::RADIUS_PILL,
+            Color32::from_white_alpha(28),
+        );
+        if earned > 0.0 {
+            widgets::gradient_pill(painter, part(earned), theme::ACCENT_A, theme::ACCENT_B);
+        }
+        for (pct, grade) in [
+            (0.7, "C"),
+            (0.8, "B"),
+            (0.9, "A"),
+            (0.95, "S"),
+            (0.99, "SS"),
+        ] {
+            let x = bar.left() + bar.width() * pct;
+            let reachable = possible >= pct;
+            let color = Color32::WHITE.gamma_multiply(if reachable { 0.55 } else { 0.18 });
+            painter.line_segment(
+                [pos2(x, bar.top() - 2.0), pos2(x, bar.bottom() + 2.0)],
+                egui::Stroke::new(1.0, color),
+            );
+            painter.text(
+                pos2(x, bar.bottom() + 4.0),
+                Align2::CENTER_TOP,
+                grade,
+                font(theme::TEXT_XS - 2.0),
+                color,
             );
         }
     }

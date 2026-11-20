@@ -78,6 +78,17 @@ impl Score {
         }
     }
 
+    /// Highest percentage still reachable if every remaining note is perfect.
+    pub fn max_possible_percent(&self) -> f64 {
+        if self.max_dp == 0 {
+            return 0.0;
+        }
+        let judged: i64 = self.counts.iter().map(|c| i64::from(*c)).sum::<i64>() * DP_WEIGHTS[0]
+            + i64::from(self.holds_ok + self.holds_ng) * DP_HOLD_OK;
+        let lost = (judged - self.dp).max(0);
+        ((self.max_dp - lost) as f64 / self.max_dp as f64 * 100.0).clamp(0.0, 100.0)
+    }
+
     /// Score percentage 0..=100.
     pub fn percent(&self) -> f64 {
         if self.max_dp == 0 {
@@ -142,5 +153,14 @@ mod tests {
         let (mean, sd) = offset_stats([10.0, 20.0, 30.0].into_iter()).unwrap();
         assert!((mean - 20.0).abs() < 1e-9);
         assert!((sd - (200.0f64 / 3.0).sqrt()).abs() < 1e-9);
+    }
+
+    #[test]
+    fn max_possible_drops_with_mistakes() {
+        let mut s = Score::new(4, 0);
+        assert_eq!(s.max_possible_percent(), 100.0);
+        s.add_judgment(Judgment::Great, 0.0, Some(0.05)); // 1 of 3 points
+        assert!((s.max_possible_percent() - 10.0 / 12.0 * 100.0).abs() < 1e-9);
+        assert!((s.percent() - 1.0 / 12.0 * 100.0).abs() < 1e-9);
     }
 }
