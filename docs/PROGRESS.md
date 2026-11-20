@@ -44,3 +44,16 @@
   layar Title / Gameplay (lead-in, pause, auto-pause saat jendela tidak fokus) / Results (grafik timing,
   saran kalibrasi satu klik), transisi fade+slide, toast, skor terbaik (`scores.json`).
 - `cargo run -- --make-test-song` membuat `Songs/_Test/Metronome/` (WAV sintetis + 3 chart).
+
+### Fase 3 — Dance mat + Library & Song Select (selesai, perlu uji dengan perangkat)
+- `input/gamepad.rs`: gilrs di thread sendiri (membangunkan UI saat mat diinjak; timestamp event asli dipakai),
+  hot-plug, debounce per panel (tekan pertama tidak tertunda), axis/hat → tekan, pemetaan default D-pad.
+- `input/profiles.rs`: profil per perangkat (VID:PID:nama) di `devices.json`, kode mentah (tombol/axis±).
+- Wizard "Atur Dance Mat" otomatis muncul saat mat tanpa profil dicolok (bisa "Nanti saja"), uji panel langsung.
+- Auto-pause + toast saat mat dicabut; toast saat dicolok.
+- `library/`: pemindaian `Songs/<Grup>/<Lagu>/` di background, `.ssc` diutamakan, hot-reload `notify` (debounce 500 ms),
+  lagu contoh dibuat otomatis saat folder Songs belum ada.
+- Layar Pilih Lagu: kartu, pencarian instan, chip tingkat kesulitan, skor terbaik, preview audio dengan fade,
+  latar dari hash judul, skeleton saat memindai, layar kosong dengan ajakan impor.
+- Catatan: mapping_source gilrs tidak bisa membedakan perangkat "dikenal", jadi aturan: belum ada profil → wizard.
+- Belum: gambar banner (butuh crate image) — latar memakai gradien dari hash judul.

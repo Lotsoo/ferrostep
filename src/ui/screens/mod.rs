@@ -1,7 +1,9 @@
 //! Screens and navigation between them.
 
 pub mod gameplay;
+pub mod pad_setup;
 pub mod results;
+pub mod song_select;
 pub mod title;
 
 use std::path::PathBuf;
@@ -42,6 +44,12 @@ pub enum Nav {
     Play(PlayRequest),
     Results(Box<ResultData>),
     Settings,
+    /// Mapping wizard for a dance mat.
+    PadSetup {
+        key: String,
+        name: String,
+        from_settings: bool,
+    },
     Quit,
 }
 

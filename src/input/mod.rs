@@ -3,11 +3,15 @@
 //! Screens never look at raw keys for gameplay; they receive
 //! [`ColumnEvent`]s and [`MenuAction`]s from [`InputHub::poll`].
 
+pub mod gamepad;
+pub mod profiles;
+
 use std::time::Instant;
 
 use eframe::egui;
 
 use crate::config::Settings;
+use gamepad::{Gamepads, PadEvent};
 
 /// Where an input came from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -48,6 +52,8 @@ pub struct FrameInput {
     pub last_key: Option<egui::Key>,
     /// True while a text field has keyboard focus (menu keys are then ignored).
     pub typing: bool,
+    /// Gamepad connect/disconnect and raw presses (for the mapping wizard).
+    pub pad_events: Vec<PadEvent>,
 }
 
 impl FrameInput {
@@ -79,12 +85,25 @@ fn menu_for_key(key: egui::Key) -> Option<MenuAction> {
 }
 
 /// Collects input from all devices.
-#[derive(Default)]
-pub struct InputHub {}
+pub struct InputHub {
+    pub gamepads: Gamepads,
+}
+
+/// Menu action for a dance mat panel.
+fn menu_for_column(column: u8) -> MenuAction {
+    match column {
+        0 => MenuAction::Left,
+        1 => MenuAction::Down,
+        2 => MenuAction::Up,
+        _ => MenuAction::Right,
+    }
+}
 
 impl InputHub {
-    pub fn new() -> Self {
-        Self {}
+    pub fn new(ctx: &egui::Context) -> Self {
+        Self {
+            gamepads: Gamepads::new(ctx),
+        }
     }
 
     /// Reads this frame's events. Call once at the start of every frame.
@@ -97,6 +116,7 @@ impl InputHub {
             menu: Vec::new(),
             last_key: None,
             typing,
+            pad_events: Vec::new(),
         };
 
         let events = ctx.input(|i| i.events.clone());
@@ -129,6 +149,32 @@ impl InputHub {
                     device: Device::Keyboard,
                 });
             }
+        }
+
+        for ev in self.gamepads.poll(now, settings.gamepad_debounce_ms) {
+            match ev {
+                PadEvent::Column {
+                    column,
+                    pressed,
+                    at,
+                } => {
+                    if pressed {
+                        frame.menu.push(menu_for_column(column));
+                    }
+                    frame.columns.push(ColumnEvent {
+                        column,
+                        pressed,
+                        at,
+                        device: Device::Gamepad,
+                    });
+                }
+                PadEvent::Start => frame.menu.push(MenuAction::Confirm),
+                PadEvent::Back => frame.menu.push(MenuAction::Back),
+                other => frame.pad_events.push(other),
+            }
+        }
+        if !frame.pad_events.is_empty() || !frame.columns.is_empty() {
+            ctx.request_repaint();
         }
         frame
     }

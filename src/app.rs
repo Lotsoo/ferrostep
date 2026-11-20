@@ -1,21 +1,22 @@
 //! Top-level application: screen state machine, shared state and transitions.
 
-use std::path::PathBuf;
-use std::sync::Arc;
 use std::time::Instant;
 
 use eframe::egui::{self, Color32, UiBuilder, vec2};
 
 use crate::audio::Audio;
 use crate::config::Settings;
+use crate::input::gamepad::PadEvent;
+use crate::input::profiles::DeviceProfile;
 use crate::input::{FrameInput, InputHub};
 use crate::library::scores::{BestScore, ScoreStore, chart_key};
-use crate::library::{songs_dir, test_song};
-use crate::parser::load_simfile;
+use crate::library::{Library, songs_dir, test_song};
 use crate::ui::screens::gameplay::GameplayScreen;
+use crate::ui::screens::pad_setup::PadSetupScreen;
 use crate::ui::screens::results::ResultsScreen;
+use crate::ui::screens::song_select::SongSelectScreen;
 use crate::ui::screens::title::TitleScreen;
-use crate::ui::screens::{Nav, PlayRequest, ResultData};
+use crate::ui::screens::{Nav, ResultData};
 use crate::ui::theme::{self, Palette};
 use crate::ui::{Toasts, anim, fonts, widgets};
 
@@ -27,7 +28,7 @@ pub struct Shared {
     /// `None` when no audio device could be opened; the app still runs.
     pub audio: Option<Audio>,
     pub palette: Palette,
-    pub songs_dir: PathBuf,
+    pub library: Library,
     pub toasts: Toasts,
     pub scores: ScoreStore,
     /// When the app started (for ambient animations).
@@ -38,6 +39,8 @@ pub struct Shared {
     pub gamepad_disconnected: bool,
     /// Navigation requested from inside a nested widget.
     pub pending_nav: Option<Nav>,
+    /// Profile finished by the mapping wizard, saved by the app.
+    pub save_pad_profile: Option<(String, DeviceProfile)>,
 }
 
 impl Shared {
@@ -62,8 +65,10 @@ impl Shared {
 /// The current screen.
 enum Screen {
     Title(TitleScreen),
+    SongSelect(Box<SongSelectScreen>),
     Gameplay(Box<GameplayScreen>),
     Results(Box<ResultsScreen>),
+    PadSetup(Box<PadSetupScreen>),
 }
 
 /// The whole app.
@@ -93,10 +98,20 @@ impl FerrostepApp {
                 None
             }
         };
+
+        let root = songs_dir(&settings);
+        // First start: give new players something to play right away.
+        if !root.exists()
+            && let Err(e) = test_song::make_test_song(&root)
+        {
+            log::warn!("could not create the sample song: {e:#}");
+        }
+        log::info!("songs folder: {}", root.display());
+
         let now = Instant::now();
         Self {
             shared: Shared {
-                songs_dir: songs_dir(&settings),
+                library: Library::new(root, &cc.egui_ctx),
                 saved_settings: settings.clone(),
                 settings,
                 last_save_check: now,
@@ -108,50 +123,27 @@ impl FerrostepApp {
                 gamepad_name: None,
                 gamepad_disconnected: false,
                 pending_nav: None,
+                save_pad_profile: None,
             },
-            input: InputHub::new(),
+            input: InputHub::new(&cc.egui_ctx),
             screen: Screen::Title(TitleScreen::default()),
             transition_start: now,
-        }
-    }
-
-    /// Temporary until the song list exists: play the metronome test song.
-    fn test_song_request(&mut self) -> Option<PlayRequest> {
-        let dir = self.shared.songs_dir.join("_Test").join("Metronome");
-        if !dir.join("metronome.sm").exists()
-            && let Err(e) = test_song::make_test_song(&self.shared.songs_dir)
-        {
-            self.shared
-                .toasts
-                .warning(format!("Lagu uji gagal dibuat: {e}"));
-            return None;
-        }
-        match load_simfile(&dir.join("metronome.sm")) {
-            Ok(sim) => Some(PlayRequest {
-                simfile: Arc::new(sim),
-                song_dir: dir,
-                chart_index: 0,
-            }),
-            Err(e) => {
-                self.shared
-                    .toasts
-                    .warning(format!("Lagu uji tidak bisa dibaca: {e}"));
-                None
-            }
         }
     }
 
     fn navigate(&mut self, ctx: &egui::Context, nav: Nav) {
         let next = match nav {
             Nav::Title => Screen::Title(TitleScreen::default()),
-            Nav::SongSelect => match self.test_song_request() {
-                Some(req) => return self.navigate(ctx, Nav::Play(req)),
-                None => Screen::Title(TitleScreen::default()),
-            },
+            Nav::SongSelect => Screen::SongSelect(Box::default()),
             Nav::Import(_) | Nav::Settings => {
                 self.shared.toasts.info("Segera hadir.");
                 return;
             }
+            Nav::PadSetup {
+                key,
+                name,
+                from_settings,
+            } => Screen::PadSetup(Box::new(PadSetupScreen::new(key, name, from_settings))),
             Nav::Play(req) => match GameplayScreen::new(req, &self.shared.settings) {
                 Ok(screen) => Screen::Gameplay(Box::new(screen)),
                 Err(e) => {
@@ -178,27 +170,71 @@ impl FerrostepApp {
         let chart = &data.request.simfile.charts[data.request.chart_index];
         let key = chart_key(&data.request.song_dir, chart);
         let failed = data.score.failed && !data.no_fail;
-        if !failed {
-            data.previous_best = self.shared.scores.record(
+        data.previous_best = if failed {
+            self.shared.scores.get(&key).map(|b| b.percent)
+        } else {
+            self.shared.scores.record(
                 key,
                 BestScore {
                     percent: data.score.percent(),
                     grade: data.score.grade(data.no_fail).to_string(),
                     max_combo: data.score.max_combo,
                 },
-            );
-        } else {
-            data.previous_best = self.shared.scores.get(&key).map(|b| b.percent);
-        }
+            )
+        };
         data
+    }
+
+    /// Toasts and the mapping wizard when mats are plugged in or out.
+    fn handle_pad_events(&mut self, input: &FrameInput) -> Option<Nav> {
+        let mut nav = None;
+        for ev in &input.pad_events {
+            match ev {
+                PadEvent::Connected {
+                    name,
+                    key,
+                    has_profile,
+                } => {
+                    self.shared
+                        .toasts
+                        .success(format!("Dance mat terhubung: {name}"));
+                    let in_game = matches!(self.screen, Screen::Gameplay(_) | Screen::PadSetup(_));
+                    if !has_profile && !in_game {
+                        nav = Some(Nav::PadSetup {
+                            key: key.clone(),
+                            name: name.clone(),
+                            from_settings: false,
+                        });
+                    } else if !has_profile {
+                        self.shared
+                            .toasts
+                            .info("Atur dance mat di Pengaturan → Kontrol setelah lagu selesai.");
+                    }
+                }
+                PadEvent::Disconnected { name } => {
+                    self.shared
+                        .toasts
+                        .warning(format!("{name} terputus — permainan dijeda"));
+                    self.shared.gamepad_disconnected = true;
+                }
+                _ => {}
+            }
+        }
+        self.shared.gamepad_name = self.input.gamepads.first_name();
+        if let Some((key, profile)) = self.shared.save_pad_profile.take() {
+            self.input.gamepads.save_profile(key, profile);
+        }
+        nav
     }
 
     fn screen_ui(&mut self, ui: &mut egui::Ui, input: &FrameInput) -> Option<Nav> {
         let shared = &mut self.shared;
         match &mut self.screen {
             Screen::Title(s) => s.ui(ui, shared, input),
+            Screen::SongSelect(s) => s.ui(ui, shared, input),
             Screen::Gameplay(s) => s.ui(ui, shared, input),
             Screen::Results(s) => s.ui(ui, shared, input),
+            Screen::PadSetup(s) => s.ui(ui, shared, input),
         }
     }
 }
@@ -210,6 +246,8 @@ impl eframe::App for FerrostepApp {
         let now = input.now;
         let full = ui.max_rect();
         let reduce = self.shared.settings.reduce_motion;
+        self.shared.library.poll(now);
+        let pad_nav = self.handle_pad_events(&input);
 
         if !matches!(self.screen, Screen::Gameplay(_)) {
             let t = if reduce {
@@ -245,9 +283,7 @@ impl eframe::App for FerrostepApp {
             ctx.request_repaint();
         }
 
-        if nav.is_none() {
-            nav = self.shared.pending_nav.take();
-        }
+        nav = nav.or_else(|| self.shared.pending_nav.take()).or(pad_nav);
         if let Some(nav) = nav {
             self.navigate(&ctx, nav);
         }
