@@ -37,7 +37,8 @@ fn main() -> eframe::Result {
             .with_title("Ferrostep")
             .with_app_id("ferrostep") // used by Wayland/KDE to match the .desktop file
             .with_inner_size([1280.0, 760.0])
-            .with_min_inner_size([960.0, 600.0]),
+            .with_min_inner_size([960.0, 600.0])
+            .with_icon(window_icon()),
         wgpu_options: wgpu_options(&settings),
         ..Default::default()
     };
@@ -52,6 +53,12 @@ fn main() -> eframe::Result {
         offer_graphics_fallback(settings, &e.to_string());
     }
     result
+}
+
+/// Taskbar/window icon (Windows, X11). Wayland uses the .desktop file's icon.
+fn window_icon() -> eframe::egui::IconData {
+    eframe::icon_data::from_png_bytes(include_bytes!("../assets/icons/ferrostep-128.png"))
+        .unwrap_or_default()
 }
 
 /// Graphics settings: VSync and the backend chosen in Settings.

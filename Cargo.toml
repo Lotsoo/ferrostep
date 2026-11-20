@@ -2,6 +2,12 @@
 name = "ferrostep"
 version = "0.1.0"
 edition = "2024"
+description = "Modern 4-panel rhythm game with an MP3/MP4 auto-charter and plug-and-play dance mat support"
+license = "MIT"
+readme = "README.md"
+keywords = ["game", "rhythm", "stepmania", "dance-mat"]
+categories = ["games"]
+publish = false
 
 [dependencies]
 anyhow = "1.0.104"
@@ -32,3 +38,27 @@ opt-level = 1
 
 [profile.dev.package."*"]
 opt-level = 3
+
+# Smaller, faster release binary. Debug info is stripped but symbol names stay,
+# so crash.log backtraces still show function names.
+[profile.release]
+lto = "thin"
+codegen-units = 4
+strip = "debuginfo"
+
+# Fedora RPM via `cargo generate-rpm` (after `cargo build --release`).
+[package.metadata.generate-rpm]
+summary = "Modern 4-panel rhythm game for keyboard and USB dance mats"
+assets = [
+    { source = "target/release/ferrostep", dest = "/usr/bin/ferrostep", mode = "755" },
+    { source = "packaging/ferrostep.desktop", dest = "/usr/share/applications/ferrostep.desktop", mode = "644" },
+    { source = "assets/icons/ferrostep.svg", dest = "/usr/share/icons/hicolor/scalable/apps/ferrostep.svg", mode = "644" },
+    { source = "assets/icons/ferrostep-256.png", dest = "/usr/share/icons/hicolor/256x256/apps/ferrostep.png", mode = "644" },
+    { source = "assets/icons/ferrostep-128.png", dest = "/usr/share/icons/hicolor/128x128/apps/ferrostep.png", mode = "644" },
+    { source = "assets/icons/ferrostep-64.png", dest = "/usr/share/icons/hicolor/64x64/apps/ferrostep.png", mode = "644" },
+    { source = "assets/icons/ferrostep-48.png", dest = "/usr/share/icons/hicolor/48x48/apps/ferrostep.png", mode = "644" },
+    { source = "assets/icons/ferrostep-32.png", dest = "/usr/share/icons/hicolor/32x32/apps/ferrostep.png", mode = "644" },
+    { source = "LICENSE", dest = "/usr/share/licenses/ferrostep/LICENSE", mode = "644" },
+    { source = "assets/fonts/LICENSE-Inter.txt", dest = "/usr/share/licenses/ferrostep/LICENSE-Inter.txt", mode = "644" },
+    { source = "README.md", dest = "/usr/share/doc/ferrostep/README.md", mode = "644" },
+]

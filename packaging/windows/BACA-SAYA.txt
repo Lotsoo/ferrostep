@@ -1,0 +1,17 @@
+FERROSTEP — cara main
+=====================
+
+1. Klik dua kali ferrostep.exe.
+   (Jika Windows SmartScreen muncul: klik "More info" → "Run anyway".
+    Ini wajar untuk aplikasi baru yang belum ditandatangani.)
+2. Ikuti panduan singkat di layar pertama.
+3. Untuk menambah lagu: menu "Impor Lagu", lalu seret file MP3/MP4 ke jendela.
+
+Folder "Songs" di samping ferrostep.exe berisi lagu-lagumu.
+Lagu StepMania (.sm/.ssc) juga bisa ditaruh di sini: Songs\<Grup>\<Lagu>\
+
+Dance mat: colokkan kabel USB kapan saja. Ferrostep akan mengenalinya dan
+memandu pengaturannya. Pilih mat berlabel "USB/PC" (bukan khusus TV).
+
+Opsional: taruh ffmpeg.exe di folder ini agar lagu hasil impor dari video
+lebih kecil.

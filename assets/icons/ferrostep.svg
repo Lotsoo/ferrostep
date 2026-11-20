@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <!-- Ferrostep app icon: four step arrows in the column colors. Original artwork. -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#141428"/>
+      <stop offset="1" stop-color="#0B0B12"/>
+    </linearGradient>
+    <linearGradient id="ring" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#7C5CFF"/>
+      <stop offset="1" stop-color="#3EC8FF"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#7C5CFF" stop-opacity="0.45"/>
+      <stop offset="1" stop-color="#7C5CFF" stop-opacity="0"/>
+    </radialGradient>
+    <path id="arrow" d="M0,-30 L30,0 L13,0 L13,28 Q13,32 9,32 L-9,32 Q-13,32 -13,28 L-13,0 L-30,0 Z"
+          stroke-linejoin="round"/>
+  </defs>
+  <rect x="8" y="8" width="240" height="240" rx="56" fill="url(#bg)"/>
+  <rect x="8.5" y="8.5" width="239" height="239" rx="55.5" fill="none" stroke="url(#ring)" stroke-opacity="0.6" stroke-width="3"/>
+  <circle cx="128" cy="128" r="104" fill="url(#glow)"/>
+  <g transform="translate(128 128)" stroke-width="6">
+    <use href="#arrow" transform="translate(0 -60)" fill="#5CFFB0" stroke="#5CFFB0"/>
+    <use href="#arrow" transform="translate(0 60) rotate(180)" fill="#3EC8FF" stroke="#3EC8FF"/>
+    <use href="#arrow" transform="translate(-60 0) rotate(-90)" fill="#FF5C8A" stroke="#FF5C8A"/>
+    <use href="#arrow" transform="translate(60 0) rotate(90)" fill="#FFC85C" stroke="#FFC85C"/>
+  </g>
+</svg>

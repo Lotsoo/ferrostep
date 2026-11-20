@@ -119,3 +119,27 @@ Di sesi Wayland, zona impor otomatis berganti teks "Klik untuk memilih file" (di
 
 **Belum bisa diuji di sini (butuh pengguna):** Windows 11 (DX12/Vulkan, joy.cpl), GNOME, dance mat sungguhan
 (latensi polling, debounce, hot-plug), ukur FPS gameplay di monitor 120 Hz+.
+
+### Tambahan — bar skor (permintaan pengguna)
+- Di bawah bar progres lagu: bar skor (terang = poin didapat, redup = persentase maksimum yang masih mungkin),
+  penanda grade C/B/A/S/SS yang meredup bila sudah tidak terjangkau. `Score::max_possible_percent` + test.
+
+### Fase 8 — Packaging & rilis (selesai; RPM dibuat oleh pengguna/CI)
+- Versi 0.1.0, lisensi **MIT** ("Ferrostep contributors") — *perlu dikonfirmasi pemilik*.
+- Ikon orisinal (SVG + PNG 32–256), ikon jendela, `packaging/ferrostep.desktop` (lolos desktop-file-validate).
+- `[package.metadata.generate-rpm]` (format diverifikasi dari README cargo-generate-rpm 0.21.1).
+- Profil release: thin LTO, strip debuginfo (nama simbol tetap untuk crash.log). Biner ±35 MB, aset tertanam.
+- `.github/workflows/build.yml`: Fedora 45 container (fmt, clippy, test, RPM) + Windows (clippy, test, zip),
+  release otomatis saat push tag `v*`. Belum dijalankan (repo belum punya remote GitHub).
+- README untuk pengguna akhir (instal, main, panduan beli & pasang dance mat, masalah umum, build).
+- `docs/ARCHITECTURE.md`.
+
+## Berikutnya / masalah terbuka
+- Pengguna: uji di Windows 11 (zip dari CI atau `cargo build --release`), uji dance mat sungguhan
+  (evtest → wizard → main), uji GNOME, uji FPS gameplay di monitor 120 Hz+.
+- Konfirmasi lisensi (MIT?) dan nama pemegang hak cipta.
+- Ide yt-dlp "impor dari URL": ditunda, keputusan di tangan pengguna (lihat diskusi: risiko ToS, rapuh;
+  bila jadi, opsional seperti ffmpeg dan tidak dibundel).
+- Fase lanjut: BPM bervariasi, video latar MP4, editor chart, mode latihan, statistik riwayat,
+  ikon .exe Windows (winres), AppImage.
+- Drag-and-drop di Wayland menunggu dukungan winit.

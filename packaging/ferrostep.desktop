@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Name=Ferrostep
+GenericName=Rhythm Game
+GenericName[id]=Game Ritme
+Comment=Modern 4-panel rhythm game for keyboard and USB dance mats
+Comment[id]=Game ritme 4 panah modern untuk keyboard dan dance mat USB
+Exec=ferrostep
+Icon=ferrostep
+Terminal=false
+Categories=Game;ArcadeGame;
+Keywords=dance;rhythm;stepmania;dance mat;music;ritme;
+StartupWMClass=ferrostep

@@ -1,0 +1,87 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  linux:
+    name: Fedora (RPM)
+    runs-on: ubuntu-latest
+    # Build inside Fedora so the RPM matches the target system.
+    container: fedora:45
+    steps:
+      - name: System packages
+        run: |
+          dnf install -y git gcc gcc-c++ make pkgconf-pkg-config \
+            alsa-lib-devel wayland-devel libxkbcommon-devel \
+            libX11-devel libXcursor-devel libXrandr-devel libXi-devel \
+            vulkan-loader-devel systemd-devel dbus-devel rpm-build tar zstd
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --check
+      - run: cargo clippy --all-targets -- -D warnings
+      - run: cargo test
+      - run: cargo build --release
+      - name: Build RPM
+        run: |
+          cargo install cargo-generate-rpm --locked
+          cargo generate-rpm
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ferrostep-fedora-rpm
+          path: target/generate-rpm/*.rpm
+
+  windows:
+    name: Windows (zip)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo clippy --all-targets -- -D warnings
+      - run: cargo test
+      - run: cargo build --release
+      - name: Package zip
+        shell: pwsh
+        run: |
+          $dir = "dist/Ferrostep"
+          New-Item -ItemType Directory -Force -Path "$dir/Songs" | Out-Null
+          Copy-Item target/release/ferrostep.exe $dir
+          Copy-Item LICENSE, README.md $dir
+          Copy-Item assets/fonts/LICENSE-Inter.txt $dir
+          Copy-Item packaging/windows/BACA-SAYA.txt $dir
+          Copy-Item packaging/windows/BACA-SAYA.txt "$dir/Songs/BACA-SAYA.txt"
+          Compress-Archive -Path $dir -DestinationPath dist/Ferrostep-windows-x86_64.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ferrostep-windows-zip
+          path: dist/Ferrostep-windows-x86_64.zip
+
+  release:
+    name: GitHub release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [linux, windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*
+          generate_release_notes: true
