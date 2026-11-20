@@ -483,27 +483,7 @@ pub fn draw_score_island(
 
     let (grade, light, deep) = live_grade(score.accuracy_percent(), failed);
     let badge = Rect::from_min_size(rect.min + vec2(14.0, 14.0), vec2(58.0, 58.0));
-    gradient_tile(
-        painter,
-        badge,
-        14,
-        light.gamma_multiply(0.85),
-        deep.gamma_multiply(0.85),
-    );
-    painter.rect_stroke(
-        badge,
-        14,
-        Stroke::new(1.0, Color32::WHITE.gamma_multiply(0.25)),
-        StrokeKind::Inside,
-    );
-    widgets::text_tracked(
-        painter,
-        badge.center(),
-        Align2::CENTER_CENTER,
-        grade,
-        font_bold(if grade.len() > 1 { 24.0 } else { 30.0 }),
-        Color32::WHITE,
-    );
+    draw_grade_badge(painter, badge, grade, light, deep);
 
     widgets::text_tracked(
         painter,
@@ -574,6 +554,46 @@ pub fn draw_score_island(
             Color32::WHITE.gamma_multiply(0.7),
         );
     }
+}
+
+/// Grade badge built for contrast: a near-black tile, a ring in the grade
+/// color, and the letter in the bright grade color (bright-on-dark reads at a
+/// glance even over a busy stage).
+pub fn draw_grade_badge(
+    painter: &Painter,
+    badge: Rect,
+    grade: &str,
+    light: Color32,
+    deep: Color32,
+) {
+    painter.rect_filled(badge, 14, Color32::from_rgb(12, 10, 24));
+    super::notefield::radial_light(painter, badge.center(), badge.width() * 0.75, deep, 0.35);
+    painter.rect_stroke(badge, 14, Stroke::new(2.0, light), StrokeKind::Inside);
+    let size = if grade.len() > 1 { 26.0 } else { 32.0 };
+    // A dark outline behind the letter keeps the edges crisp.
+    for d in [
+        vec2(0.0, 1.5),
+        vec2(0.0, -1.0),
+        vec2(1.0, 0.0),
+        vec2(-1.0, 0.0),
+    ] {
+        widgets::text_tracked(
+            painter,
+            badge.center() + d,
+            Align2::CENTER_CENTER,
+            grade,
+            font_bold(size),
+            Color32::from_black_alpha(200),
+        );
+    }
+    widgets::text_tracked(
+        painter,
+        badge.center(),
+        Align2::CENTER_CENTER,
+        grade,
+        font_bold(size),
+        light,
+    );
 }
 
 // ── Life gauge ──────────────────────────────────────────────────────────

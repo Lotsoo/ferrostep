@@ -76,6 +76,7 @@ Pemakaian: ferrostep [opsi]
   --chart <nomor>         Pilih chart (indeks di simfile) untuk --play
   --autoplay              Game menekan panah sendiri (skor tidak disimpan)
   --open <layar>          Buka langsung: songs, import, atau settings
+  <file.mp3> <file.mp4>…  Impor file-file tersebut (bisa lebih dari satu)
   -h, --help              Tampilkan bantuan ini
 
 Log rinci: RUST_LOG=ferrostep=debug";
@@ -100,6 +101,13 @@ fn parse_launch(args: &[String]) -> Result<app::LaunchOptions, String> {
             "--autoplay" => launch.autoplay = true,
             "--open" => launch.open = Some(it.next().ok_or("--open butuh nama layar")?.clone()),
             "--make-test-song" => {}
+            // Audio/video files ("Open with Ferrostep", or several at once): import them.
+            other
+                if !other.starts_with('-')
+                    && ferrostep::importer::is_importable(other.as_ref()) =>
+            {
+                launch.import.push(other.into());
+            }
             // Ignore unknown flags some launchers add (e.g. -psn_ on macOS).
             other => log::debug!("ignoring argument {other}"),
         }

@@ -163,6 +163,13 @@ Di sesi Wayland, zona impor otomatis berganti teks "Klik untuk memilih file" (di
 - `notefield::radial_light`: semua glow memakai mesh radial (tanpa cincin/banding).
 - Kursor tangan saat menyorot apa pun yang bisa diklik (global di `app.rs`), kursor "grabbing" saat menyeret daftar lagu.
 
+### Navigasi, kontras grade, impor banyak file (permintaan pengguna)
+
+- Tombol "‹ Kembali" di Pilih Lagu; tombol "Jeda" di gameplay untuk pengguna mouse (Esc tetap berfungsi).
+- Badge grade kontras tinggi: tile hampir hitam, cincin + huruf berwarna terang, outline gelap di belakang huruf.
+- Impor banyak file: sebelumnya antrean berhenti di kartu hasil lagu pertama (terlihat seperti hanya 1 lagu terbaca). Sekarang berjalan otomatis ("Lagu 2 dari 8"), file gagal tidak menghentikan antrean, dan diakhiri kartu ringkasan (berhasil/gagal + alasan ramah). Satu file tetap memakai kartu hasil detail (koreksi BPM).
+- File audio sebagai argumen langsung diimpor (`ferrostep a.mp3 b.mp4`), siap untuk "Buka dengan Ferrostep".
+
 ## Berikutnya / masalah terbuka
 - Pengguna: uji di Windows 11 (zip dari CI atau `cargo build --release`), uji dance mat sungguhan
   (evtest → wizard → main), uji GNOME, uji FPS gameplay di monitor 120 Hz+.

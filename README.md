@@ -44,7 +44,7 @@ Lagu disimpan di `~/.local/share/ferrostep/Songs`. Bisa diganti di **Pengaturan 
 
 Menu: panah untuk memilih, `Enter` untuk masuk, `Esc` untuk kembali. Semua tombol bisa diubah di **Pengaturan → Kontrol**.
 
-**Menambah lagu:** buka **Impor Lagu**, lalu pilih atau seret file MP3/MP4. Lagu siap dimainkan dalam beberapa detik.
+**Menambah lagu:** buka **Impor Lagu**, lalu pilih atau seret file MP3/MP4 — boleh banyak sekaligus. Lagu siap dimainkan dalam beberapa detik.
 Jika panah terasa terlalu rapat atau jarang, tekan **÷2** atau **×2** di kartu hasil impor.
 
 **Suara terasa terlambat?** Buka **Pengaturan → Audio → Kalibrasi offset**, lalu ketuk mengikuti klik 16 kali.
@@ -107,6 +107,7 @@ cargo test                      # semua test (tanpa perangkat/audio)
 cargo run -- --make-test-song   # buat lagu metronom di Songs/_Test/
 RUST_LOG=ferrostep=debug cargo run   # log rinci, termasuk FPS
 cargo run -- --play "Songs/_Test/Metronome" --autoplay   # langsung main, game menekan sendiri
+cargo run -- lagu1.mp3 lagu2.mp4 # impor beberapa file sekaligus
 cargo run -- --help             # semua opsi
 ```
 

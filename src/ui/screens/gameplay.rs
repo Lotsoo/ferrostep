@@ -391,6 +391,9 @@ impl GameplayScreen {
             now,
         );
         self.draw_hud(&painter, &stage, shared);
+        if self.pause.is_none() && self.pause_button(ui, rect) {
+            self.set_paused(true, now);
+        }
 
         if self.song_time < 0.0 && self.pause.is_none() {
             hud::draw_countdown(&painter, rect.center(), -self.song_time, reduce);
@@ -532,6 +535,43 @@ impl GameplayScreen {
         }
     }
 
+    /// A pause button under the song card, for mouse players (Esc works too).
+    fn pause_button(&self, ui: &mut Ui, rect: Rect) -> bool {
+        let r = Rect::from_min_size(rect.left_top() + vec2(24.0, 112.0), vec2(96.0, 32.0));
+        let resp = ui
+            .interact(r, ui.scope_id().with("pause-button"), egui::Sense::click())
+            .on_hover_text("Jeda (Esc)");
+        let hover = ui.ctx().animate_bool(resp.id, resp.hovered());
+        let painter = ui.painter();
+        let r = if resp.is_pointer_button_down_on() {
+            Rect::from_center_size(r.center(), r.size() * 0.96)
+        } else {
+            r
+        };
+        hud::glass(painter, r);
+        painter.rect_filled(
+            r,
+            theme::RADIUS_CARD,
+            Color32::WHITE.gamma_multiply(0.06 * hover),
+        );
+        let icon = pos2(r.left() + 22.0, r.center().y);
+        for dx in [-4.0, 4.0] {
+            painter.rect_filled(
+                Rect::from_center_size(icon + vec2(dx, 0.0), vec2(4.0, 13.0)),
+                1,
+                Color32::WHITE.gamma_multiply(0.85),
+            );
+        }
+        painter.text(
+            pos2(r.left() + 38.0, r.center().y),
+            Align2::LEFT_CENTER,
+            "Jeda",
+            font_bold(theme::TEXT_S),
+            Color32::WHITE.gamma_multiply(0.85 + 0.15 * hover),
+        );
+        resp.clicked()
+    }
+
     fn draw_hud(&self, painter: &egui::Painter, stage: &Stage, shared: &Shared) {
         let rect = stage.rect;
         hud::draw_song_island(
@@ -556,7 +596,7 @@ impl GameplayScreen {
             self.session.score.failed,
         );
         if shared.autoplay {
-            let pill = Rect::from_min_size(rect.left_top() + vec2(24.0, 112.0), vec2(96.0, 24.0));
+            let pill = Rect::from_min_size(rect.left_top() + vec2(132.0, 116.0), vec2(96.0, 24.0));
             painter.rect_filled(
                 pill,
                 theme::RADIUS_PILL,

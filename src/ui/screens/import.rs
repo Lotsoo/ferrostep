@@ -27,12 +27,27 @@ enum Phase {
     Running,
     Done(Box<ImportResult>),
     Failed(String),
+    /// Several files were imported in one go: show what happened to each.
+    Summary,
+}
+
+/// Outcome of one file in a multi-file import.
+struct BatchEntry {
+    /// File name the user picked.
+    file: String,
+    /// `Ok((song title, bpm))` or `Err(reason)`.
+    outcome: Result<(String, f64), String>,
 }
 
 pub struct ImportScreen {
     phase: Phase,
     job: Option<ImportJob>,
     queue: Vec<PathBuf>,
+    /// File currently being imported.
+    current: Option<PathBuf>,
+    /// Files in the current run; above 1 the run continues automatically.
+    batch_size: usize,
+    batch: Vec<BatchEntry>,
     stage: Stage,
     stage_progress: f32,
     /// When each stage finished (for the check-mark animation).
@@ -51,6 +66,9 @@ impl ImportScreen {
             phase: Phase::Idle,
             job: None,
             queue: Vec::new(),
+            current: None,
+            batch_size: 0,
+            batch: Vec::new(),
             stage: Stage::Reading,
             stage_progress: 0.0,
             stage_done: [None; 5],
@@ -72,8 +90,56 @@ impl ImportScreen {
 
     /// Adds files; unsupported ones are ignored.
     pub fn enqueue(&mut self, files: Vec<PathBuf>) {
-        self.queue
-            .extend(files.into_iter().filter(|p| is_importable(p)));
+        let files: Vec<PathBuf> = files.into_iter().filter(|p| is_importable(p)).collect();
+        if files.is_empty() {
+            return;
+        }
+        // Nothing running or waiting: this starts a new run.
+        if !self.is_busy() && self.queue.is_empty() {
+            self.batch.clear();
+            self.batch_size = 0;
+        }
+        self.batch_size += files.len();
+        self.queue.extend(files);
+    }
+
+    /// True when several files are being imported in one run.
+    fn is_batch(&self) -> bool {
+        self.batch_size > 1
+    }
+
+    /// In a multi-file run, records the finished file and moves on by itself,
+    /// ending on a summary. Single files keep the detailed result card.
+    fn advance_batch(&mut self) {
+        if !self.is_batch() {
+            return;
+        }
+        let file = self
+            .current
+            .as_ref()
+            .and_then(|p| p.file_name())
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let outcome = match &self.phase {
+            Phase::Done(r) => Some(Ok((r.simfile.meta.title.clone(), r.bpm()))),
+            Phase::Failed(e) => Some(Err(e.clone())),
+            _ => None,
+        };
+        if let Some(outcome) = outcome {
+            self.batch.push(BatchEntry { file, outcome });
+            self.current = None;
+            self.phase = if self.queue.is_empty() {
+                Phase::Summary
+            } else {
+                Phase::Idle
+            };
+        } else if matches!(self.phase, Phase::Idle)
+            && self.queue.is_empty()
+            && !self.batch.is_empty()
+        {
+            // Cancelled part-way: show what was already imported.
+            self.phase = Phase::Summary;
+        }
     }
 
     fn start_next(&mut self, shared: &Shared, ctx: &egui::Context) {
@@ -81,6 +147,7 @@ impl ImportScreen {
             return;
         }
         let file = self.queue.remove(0);
+        self.current = Some(file.clone());
         self.job = Some(ImportJob::start(
             file,
             &shared.library.root,
@@ -146,9 +213,11 @@ impl ImportScreen {
                 ImportEvent::Waveform(w) => self.waveform = w,
                 ImportEvent::Done(result) => {
                     log::info!("imported {} in {:?}", result.dir.display(), result.elapsed);
-                    shared
-                        .toasts
-                        .success(format!("“{}” siap dimainkan!", result.simfile.meta.title));
+                    if !self.is_batch() {
+                        shared
+                            .toasts
+                            .success(format!("“{}” siap dimainkan!", result.simfile.meta.title));
+                    }
                     shared.library.mark_new(result.dir.clone());
                     self.bpm_text = format_bpm(result.bpm());
                     self.chart = 1.min(result.simfile.charts.len().saturating_sub(1));
@@ -170,6 +239,7 @@ impl ImportScreen {
         let now = input.now;
         let ctx = ui.ctx().clone();
         self.poll(shared, now);
+        self.advance_batch();
         if matches!(self.phase, Phase::Idle) {
             self.start_next(shared, &ctx);
         }
@@ -230,6 +300,7 @@ impl ImportScreen {
             Phase::Running => self.draw_running(ui, shared, content, now),
             Phase::Done(_) => self.draw_done(ui, shared, content),
             Phase::Failed(_) => self.draw_failed(ui, shared, content),
+            Phase::Summary => self.draw_summary(ui, shared, content),
         };
         nav.or(local)
     }
@@ -387,13 +458,13 @@ impl ImportScreen {
             font_bold(theme::TEXT_L),
             palette.text,
         );
-        if !self.queue.is_empty() {
+        if self.is_batch() {
             painter.text(
                 inner.right_top(),
                 Align2::RIGHT_TOP,
-                format!("+{} antre", self.queue.len()),
-                font(theme::TEXT_S),
-                palette.text_dim,
+                format!("Lagu {} dari {}", self.batch.len() + 1, self.batch_size),
+                font_bold(theme::TEXT_S),
+                theme::ACCENT_B,
             );
         }
 
@@ -794,6 +865,141 @@ impl ImportScreen {
         }
         None
     }
+
+    fn draw_summary(&mut self, ui: &mut Ui, shared: &Shared, area: Rect) -> Option<Nav> {
+        const MAX_ROWS: usize = 7;
+        let palette = shared.palette;
+        let painter = ui.painter().clone();
+        let ok = self.batch.iter().filter(|e| e.outcome.is_ok()).count();
+        let failed = self.batch.len() - ok;
+        let rows = self.batch.len().min(MAX_ROWS);
+        let extra = if self.batch.len() > MAX_ROWS {
+            24.0
+        } else {
+            0.0
+        };
+        let height = (150.0_f32 + rows as f32 * 40.0 + extra + 76.0).min(area.height());
+        let card = Rect::from_center_size(area.center(), vec2(area.width(), height));
+        widgets::card(&painter, card, &palette);
+        let inner = card.shrink(28.0);
+
+        let title = if failed == 0 {
+            format!("{ok} lagu siap dimainkan!")
+        } else if ok == 0 {
+            "Belum ada lagu yang berhasil diimpor".to_string()
+        } else {
+            format!("{ok} lagu berhasil, {failed} gagal")
+        };
+        widgets::text_tracked(
+            &painter,
+            inner.left_top(),
+            Align2::LEFT_TOP,
+            &title,
+            font_bold(theme::TEXT_L),
+            palette.text,
+        );
+        painter.text(
+            inner.left_top() + vec2(0.0, 36.0),
+            Align2::LEFT_TOP,
+            if ok > 0 {
+                "Lagu baru sudah ada di daftar lagu, ditandai badge \"Auto\"."
+            } else {
+                "Coba file lain, atau pastikan file bisa diputar di pemutar musik biasa."
+            },
+            font(theme::TEXT_S),
+            palette.text_dim,
+        );
+
+        let mut y = inner.top() + 76.0;
+        for entry in self.batch.iter().take(MAX_ROWS) {
+            let row = Rect::from_min_size(pos2(inner.left(), y), vec2(inner.width(), 34.0));
+            painter.rect_filled(
+                row,
+                theme::RADIUS_BUTTON,
+                palette.surface_hover.gamma_multiply(0.6),
+            );
+            let icon = pos2(row.left() + 18.0, row.center().y);
+            match &entry.outcome {
+                Ok((title, bpm)) => {
+                    painter.circle_filled(icon, 9.0, SUCCESS.gamma_multiply(0.2));
+                    painter.text(icon, Align2::CENTER_CENTER, "✓", font_bold(12.0), SUCCESS);
+                    painter.text(
+                        pos2(row.left() + 38.0, row.center().y),
+                        Align2::LEFT_CENTER,
+                        super::song_select::truncate(title, 50),
+                        font_bold(theme::TEXT_S),
+                        palette.text,
+                    );
+                    painter.text(
+                        pos2(row.right() - 14.0, row.center().y),
+                        Align2::RIGHT_CENTER,
+                        format!("{} BPM", format_bpm(*bpm)),
+                        font(theme::TEXT_XS),
+                        palette.text_dim,
+                    );
+                }
+                Err(reason) => {
+                    painter.circle_filled(icon, 9.0, DANGER.gamma_multiply(0.2));
+                    painter.text(icon, Align2::CENTER_CENTER, "!", font_bold(12.0), DANGER);
+                    painter.text(
+                        pos2(row.left() + 38.0, row.center().y),
+                        Align2::LEFT_CENTER,
+                        super::song_select::truncate(&entry.file, 36),
+                        font_bold(theme::TEXT_S),
+                        palette.text,
+                    );
+                    painter.text(
+                        pos2(row.right() - 14.0, row.center().y),
+                        Align2::RIGHT_CENTER,
+                        super::song_select::truncate(friendly_reason(reason), 44),
+                        font(theme::TEXT_XS),
+                        DANGER.lerp_to_gamma(palette.text, 0.3),
+                    );
+                }
+            }
+            y += 40.0;
+        }
+        if self.batch.len() > MAX_ROWS {
+            painter.text(
+                pos2(inner.left(), y),
+                Align2::LEFT_TOP,
+                format!("…dan {} lagu lainnya", self.batch.len() - MAX_ROWS),
+                font(theme::TEXT_XS),
+                palette.text_dim,
+            );
+        }
+
+        let by = inner.bottom() - 48.0;
+        let mut nav = None;
+        let list_r = Rect::from_min_size(pos2(inner.left(), by), vec2(220.0, 48.0));
+        if ok > 0
+            && ui
+                .put(list_r, |ui: &mut Ui| {
+                    widgets::primary_button(ui, "Lihat di daftar lagu  ›", list_r.size(), true)
+                })
+                .clicked()
+        {
+            nav = Some(Nav::SongSelect);
+        }
+        let again_x = if ok > 0 {
+            list_r.right() + 12.0
+        } else {
+            inner.left()
+        };
+        let again_r = Rect::from_min_size(pos2(again_x, by + 2.0), vec2(180.0, 44.0));
+        if ui
+            .put(again_r, |ui: &mut Ui| {
+                widgets::secondary_button(ui, &palette, "Impor lagu lain", again_r.size())
+            })
+            .clicked()
+        {
+            self.batch.clear();
+            self.batch_size = 0;
+            self.phase = Phase::Idle;
+            self.open_picker(ui.ctx());
+        }
+        nav
+    }
 }
 
 fn play(result: &ImportResult, chart: usize) -> Nav {
@@ -868,5 +1074,30 @@ fn draw_waveform(
             ],
             Stroke::new((w * 0.6).max(1.0), color),
         );
+    }
+}
+
+/// The plain-language part of an error, without technical details in
+/// parentheses or after a colon (those stay in the log).
+fn friendly_reason(reason: &str) -> &str {
+    reason
+        .split(" (")
+        .next()
+        .and_then(|r| r.split(": ").next())
+        .unwrap_or(reason)
+        .trim()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::friendly_reason;
+
+    #[test]
+    fn strips_technical_details() {
+        assert_eq!(
+            friendly_reason("format audio tidak dikenali: unsupported feature (probe)"),
+            "format audio tidak dikenali"
+        );
+        assert_eq!(friendly_reason("file kosong"), "file kosong");
     }
 }

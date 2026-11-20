@@ -267,9 +267,21 @@ impl SongSelectScreen {
 
         // ── Header ──────────────────────────────────────────────
         let header = Rect::from_min_size(rect.min, vec2(rect.width(), 56.0));
+        // Always-visible way back (not everyone reads the hints at the bottom).
+        let back = Rect::from_min_size(header.left_center() - vec2(0.0, 20.0), vec2(120.0, 40.0));
+        if ui
+            .put(back, |ui: &mut Ui| {
+                widgets::secondary_button(ui, &palette, "‹  Kembali", back.size())
+            })
+            .on_hover_text("Kembali ke menu utama (Esc)")
+            .clicked()
+        {
+            return Some(Nav::Title);
+        }
+        let title_x = back.right() + 24.0;
         widgets::text_tracked(
             ui.painter(),
-            header.left_center(),
+            pos2(title_x, header.center().y),
             Align2::LEFT_CENTER,
             "Pilih Lagu",
             font_bold(theme::TEXT_XL),
@@ -281,7 +293,7 @@ impl SongSelectScreen {
             format!("{} lagu", self.filtered.len())
         };
         ui.painter().text(
-            header.left_center() + vec2(190.0, 4.0),
+            pos2(title_x + 190.0, header.center().y + 4.0),
             Align2::LEFT_CENTER,
             count,
             font(theme::TEXT_S),

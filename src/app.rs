@@ -34,6 +34,8 @@ pub struct LaunchOptions {
     pub autoplay: bool,
     /// Open this screen first: `songs`, `import` or `settings`.
     pub open: Option<String>,
+    /// Files to import right away.
+    pub import: Vec<std::path::PathBuf>,
 }
 
 /// State shared by all screens.
@@ -189,6 +191,9 @@ impl FerrostepApp {
             fps_since: now,
             fps_work: 0.0,
         };
+        if !launch.import.is_empty() {
+            app.navigate(&cc.egui_ctx, Nav::Import(launch.import.clone()));
+        }
         match launch.open.as_deref() {
             Some("songs") => app.navigate(&cc.egui_ctx, Nav::SongSelect),
             Some("import") => app.navigate(&cc.egui_ctx, Nav::Import(Vec::new())),
