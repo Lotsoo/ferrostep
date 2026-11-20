@@ -57,3 +57,14 @@
   latar dari hash judul, skeleton saat memindai, layar kosong dengan ajakan impor.
 - Catatan: mapping_source gilrs tidak bisa membedakan perangkat "dikenal", jadi aturan: belum ada profil → wizard.
 - Belum: gambar banner (butuh crate image) — latar memakai gradien dari hash judul.
+
+### Fase 4 — audio_dsp (selesai)
+- `decode.rs`: symphonia 0.6 (versi sama dengan kira) → mono f32 pada sample rate asli, baca tag judul/artis,
+  opsi tulis WAV stereo 16-bit sambil decode, bisa dibatalkan.
+- `onset.rs`: STFT Hann 2048/hop 512, spectral flux log, pita low/high, peak picking adaptif (median ±100 ms + delta),
+  interpolasi parabola sub-frame, latensi flux dihitung analitis (3N/4 − H/2 sampel), sustain, jendela paling energik.
+- `tempo.rs`: autokorelasi berbobot (preferensi 120 BPM), penghalusan BPM via phase coherence (resolusi 0,0002),
+  pembulatan bila dekat bilangan bulat, fase grid 1 ms dengan bobot kick.
+- Hasil test sintetis: 128/140/95,5 BPM klik dan drum 120 BPM → BPM tepat (±0,01), error fase ≤ 5 ms.
+- Pelajaran: hi-hat/noise mendominasi flux total sehingga kick hilang → onset dipilih dari fungsi deteksi
+  seimbang (½ flux total + ½ flux pita rendah), fase memakai bobot pita rendah.

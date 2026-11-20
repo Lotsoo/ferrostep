@@ -14,7 +14,18 @@ hound = "3.5.1"
 kira = "0.12.6"
 log = "0.4.35"
 notify = "8.2.2"
+rustfft = "6.4.1"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
+symphonia = { version = "0.6.1", features = ["mp3", "aac", "isomp4", "ogg", "vorbis", "wav", "flac", "pcm"] }
 thiserror = "2.0.21"
 toml = "1.2.1"
+
+# Light optimisation for our code and full optimisation for dependencies in
+# debug builds: keeps `cargo run`/`cargo test` fast (FFT, decoding) while
+# compile times stay short.
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3
