@@ -23,6 +23,12 @@ use crate::ui::screens::{Nav, ResultData};
 use crate::ui::theme::{self, Palette};
 use crate::ui::{Toasts, anim, fonts, widgets};
 
+mod quit;
+mod shell;
+
+use quit::QuitDialog;
+use shell::{draw_transition_streaks, pointer_cursor};
+
 /// Command-line options for developers (see `--help`).
 #[derive(Debug, Clone, Default)]
 pub struct LaunchOptions {
@@ -110,13 +116,6 @@ enum Screen {
 }
 
 /// The whole app.
-/// "Really quit?" dialog state.
-struct QuitDialog {
-    /// 0 = Batal (default, safe), 1 = Keluar.
-    selected: usize,
-    opened: Instant,
-}
-
 pub struct FerrostepApp {
     /// Welcome letter shown on every start (private builds only); blocks everything else.
     letter: Option<crate::ui::gift::letter::Letter>,
@@ -278,37 +277,6 @@ impl FerrostepApp {
         self.navigate(Nav::Play(request));
     }
 
-    /// Arcade-style feedback: a sound for every menu move, choice and click.
-    /// Silent while playing (the music and your steps are the sound) and
-    /// during calibration (it needs to hear only the metronome).
-    fn menu_sounds(&mut self, ctx: &egui::Context, input: &FrameInput) {
-        let hovered = hovered_clickable(ctx);
-        let new_hover = hovered.is_some() && hovered != self.last_hover;
-        self.last_hover = hovered;
-        let quiet = match &self.screen {
-            Screen::Gameplay(g) => !g.is_paused(),
-            Screen::Settings(s) => s.is_calibrating(),
-            Screen::Onboarding(o) => o.is_calibrating() || o.in_tutorial(),
-            Screen::PadSetup(_) | Screen::Tutorial(_) => true,
-            _ => false,
-        };
-        if quiet {
-            return;
-        }
-        let sound = input
-            .menu
-            .last()
-            .map(|a| sfx_for(*a))
-            .or_else(|| {
-                ctx.interaction_snapshot(|i| i.clicked)
-                    .map(|_| Sfx::Confirm)
-            })
-            .or_else(|| new_hover.then_some(Sfx::Hover));
-        if let Some(sound) = sound {
-            self.shared.sfx(sound);
-        }
-    }
-
     fn navigate(&mut self, nav: Nav) {
         // Leaving onboarding in any way (finished, skipped, mat wizard) completes it.
         if matches!(self.screen, Screen::Onboarding(_)) {
@@ -423,198 +391,6 @@ impl FerrostepApp {
             self.input.gamepads.save_profile(key, profile);
         }
         nav
-    }
-
-    /// Logs the frame rate every 2 s (`RUST_LOG=ferrostep=debug`).
-    ///
-    /// `work` is the CPU time this frame took to build. The FPS itself is often
-    /// capped by the compositor/monitor, so the CPU time shows the real headroom.
-    fn log_fps(&mut self, now: Instant, work: f32) {
-        self.fps_frames += 1;
-        self.fps_work += work;
-        let elapsed = anim::since(self.fps_since, now);
-        if elapsed >= 2.0 {
-            let avg_ms = self.fps_work / self.fps_frames as f32 * 1000.0;
-            log::debug!(
-                "fps: {:.0}, frame build {avg_ms:.2} ms (~{:.0} fps possible)",
-                self.fps_frames as f32 / elapsed,
-                1000.0 / avg_ms.max(0.01)
-            );
-            self.fps_frames = 0;
-            self.fps_since = now;
-            self.fps_work = 0.0;
-        }
-    }
-
-    /// Re-applies theme and UI scale after they change in Settings.
-    fn apply_look(&mut self, ctx: &egui::Context) {
-        let wanted = (self.shared.settings.theme, self.shared.settings.ui_scale);
-        if wanted != self.shared.applied_look {
-            self.shared.palette = Palette::for_choice(wanted.0);
-            theme::apply(ctx, &self.shared.palette, wanted.1);
-            self.shared.applied_look = wanted;
-        }
-    }
-
-    /// Files dropped on the window open the import screen (from any screen but gameplay).
-    fn handle_dropped_files(&mut self, ui: &egui::Ui, ctx: &egui::Context) -> Option<Nav> {
-        let (hovered, dropped) = ctx.input(|i| {
-            let dropped: Vec<std::path::PathBuf> = i
-                .raw
-                .dropped_files
-                .iter()
-                .map(|f| f.path().to_path_buf())
-                .collect();
-            (!i.raw.hovered_files.is_empty(), dropped)
-        });
-        let in_game = matches!(self.screen, Screen::Gameplay(_));
-        if hovered && !in_game {
-            let rect = ui.max_rect();
-            let painter = ui.ctx().layer_painter(egui::LayerId::new(
-                egui::Order::Foreground,
-                egui::Id::unique("drop-overlay"),
-            ));
-            painter.rect_filled(rect, 0, Color32::from_black_alpha(170));
-            painter.rect_stroke(
-                rect.shrink(16.0),
-                theme::RADIUS_CARD,
-                egui::Stroke::new(3.0, theme::ACCENT_B),
-                egui::StrokeKind::Inside,
-            );
-            painter.text(
-                rect.center(),
-                egui::Align2::CENTER_CENTER,
-                "Lepaskan untuk mengimpor",
-                theme::font_bold(theme::TEXT_XL),
-                Color32::WHITE,
-            );
-        }
-        if dropped.is_empty() {
-            return None;
-        }
-        let files: Vec<_> = dropped
-            .into_iter()
-            .filter(|p| crate::importer::is_importable(p))
-            .collect();
-        if files.is_empty() {
-            self.shared
-                .toasts
-                .warning("Hanya file MP3, MP4, M4A, OGG, WAV, atau FLAC yang bisa diimpor.");
-            None
-        } else if in_game {
-            self.shared
-                .toasts
-                .info("Selesaikan lagu dulu, lalu seret file lagi untuk mengimpor.");
-            None
-        } else {
-            Some(Nav::Import(files))
-        }
-    }
-
-    /// Asks before quitting (window close button, Alt+F4, Esc on the title).
-    fn open_quit_dialog(&mut self) {
-        if self.quit_dialog.is_none() {
-            self.quit_dialog = Some(QuitDialog {
-                selected: 0,
-                opened: Instant::now(),
-            });
-            if let Screen::Gameplay(g) = &mut self.screen {
-                g.pause_now();
-            }
-        }
-    }
-
-    /// Draws the quit dialog and handles its keys. Returns true when it is open.
-    fn quit_dialog_ui(&mut self, ctx: &egui::Context, input: &FrameInput) -> bool {
-        let Some(dialog) = &mut self.quit_dialog else {
-            return false;
-        };
-        let mut choice = None;
-        for action in &input.menu {
-            match action {
-                MenuAction::Left | MenuAction::Right | MenuAction::Up | MenuAction::Down => {
-                    dialog.selected = 1 - dialog.selected;
-                }
-                MenuAction::Confirm => choice = Some(dialog.selected == 1),
-                MenuAction::Back => choice = Some(false),
-            }
-        }
-        let palette = self.shared.palette;
-        let appear = anim::ease_out_cubic(anim::progress(
-            dialog.opened,
-            input.now,
-            0.2,
-            self.shared.settings.reduce_motion,
-        ));
-        let importing = matches!(&self.screen, Screen::Import(s) if s.is_busy());
-        let selected = dialog.selected;
-        let modal = egui::Modal::new(egui::Id::unique("quit-dialog"))
-            .backdrop_color(Color32::from_black_alpha((160.0 * appear) as u8))
-            .frame(egui::Frame::NONE)
-            .show(ctx, |ui| {
-                let size = vec2(420.0, 210.0);
-                let (rect, _) = ui.allocate_exact_size(size, egui::Sense::hover());
-                let rect = egui::Rect::from_center_size(
-                    rect.center() + vec2(0.0, (1.0 - appear) * 16.0),
-                    rect.size() * (0.96 + 0.04 * appear),
-                );
-                let painter = ui.painter();
-                widgets::card(painter, rect, &palette);
-                widgets::text_tracked(
-                    painter,
-                    rect.left_top() + vec2(28.0, 28.0),
-                    egui::Align2::LEFT_TOP,
-                    "Keluar dari Ferrostep?",
-                    theme::font_bold(theme::TEXT_L),
-                    palette.text,
-                );
-                painter.text(
-                    rect.left_top() + vec2(28.0, 68.0),
-                    egui::Align2::LEFT_TOP,
-                    if importing {
-                        "Impor yang sedang berjalan akan dibatalkan."
-                    } else {
-                        "Pengaturan dan skormu sudah tersimpan otomatis."
-                    },
-                    theme::font(theme::TEXT_S),
-                    palette.text_dim,
-                );
-                let mut clicked = None;
-                let buttons = [("Batal", 0usize), ("Keluar", 1usize)];
-                for (i, (label, value)) in buttons.into_iter().enumerate() {
-                    let r = egui::Rect::from_min_size(
-                        rect.left_bottom() + vec2(28.0 + i as f32 * 194.0, -76.0),
-                        vec2(170.0, 48.0),
-                    );
-                    let resp = ui.put(r, |ui: &mut egui::Ui| {
-                        if selected == value {
-                            widgets::primary_button(ui, label, r.size(), true)
-                        } else {
-                            widgets::secondary_button(ui, &palette, label, r.size())
-                        }
-                    });
-                    if resp.clicked() {
-                        clicked = Some(value == 1);
-                    }
-                }
-                clicked
-            });
-        let choice = choice
-            .or(modal.inner)
-            .or(modal.should_close().then_some(false));
-        match choice {
-            Some(true) => {
-                self.allow_close = true;
-                if let Screen::Import(s) = &mut self.screen {
-                    s.cancel_all();
-                }
-                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
-            }
-            Some(false) => self.quit_dialog = None,
-            None => {}
-        }
-        ctx.request_repaint();
-        true
     }
 
     fn screen_ui(&mut self, ui: &mut egui::Ui, input: &FrameInput) -> Option<Nav> {
@@ -748,84 +524,5 @@ impl eframe::App for FerrostepApp {
         self.shared.toasts.show(&ctx, &self.shared.palette, now);
         self.log_fps(now, anim::since(now, Instant::now()));
         self.shared.autosave(now);
-    }
-}
-
-/// Shows a pointing hand over anything clickable (our custom widgets draw
-/// themselves, so egui would otherwise keep the arrow). Widgets that chose
-/// their own cursor (text fields, dragged lists) keep it.
-fn pointer_cursor(ctx: &egui::Context) {
-    if ctx.output(|o| o.cursor_icon) != egui::CursorIcon::Default {
-        return;
-    }
-    if hovered_clickable(ctx).is_some() {
-        ctx.set_cursor_icon(egui::CursorIcon::PointingHand);
-    }
-}
-
-/// The enabled, clickable widget under the pointer, if any.
-fn hovered_clickable(ctx: &egui::Context) -> Option<egui::Id> {
-    ctx.interaction_snapshot(|i| i.hovered.clone())
-        .into_iter()
-        .find(|id| {
-            ctx.read_response(*id)
-                .is_some_and(|r| r.enabled() && r.sense.senses_click())
-        })
-}
-
-/// Which sound a menu action makes.
-fn sfx_for(action: MenuAction) -> Sfx {
-    match action {
-        MenuAction::Up => Sfx::MoveUp,
-        MenuAction::Down => Sfx::MoveDown,
-        MenuAction::Left => Sfx::ChangeLeft,
-        MenuAction::Right => Sfx::ChangeRight,
-        MenuAction::Confirm => Sfx::Confirm,
-        MenuAction::Back => Sfx::Back,
-    }
-}
-
-/// Four light streaks in the arrow colors that fly across the screen during a
-/// screen change, in the direction of travel (no extra delay: they ride the
-/// same spring as the slide).
-fn draw_transition_streaks(painter: &egui::Painter, full: egui::Rect, e: f32, dir: f32) {
-    for c in 0..4u8 {
-        let p = ((e - f32::from(c) * 0.07) / 0.75).clamp(0.0, 1.0);
-        if p <= 0.0 || p >= 1.0 {
-            continue;
-        }
-        let travel = anim::ease_out_cubic(p);
-        // Enter from the side the new screen comes from.
-        let x = if dir > 0.0 {
-            full.right() - travel * (full.width() + 120.0)
-        } else {
-            full.left() + travel * (full.width() + 120.0)
-        };
-        let color = theme::column_color(c);
-        let alpha = (1.0 - p) * 0.8;
-        let streak = egui::Rect::from_min_max(
-            egui::pos2(x, full.top()),
-            egui::pos2(x + 120.0 * dir.signum(), full.bottom()),
-        );
-        let streak =
-            egui::Rect::from_min_max(streak.min.min(streak.max), streak.min.max(streak.max));
-        let (left, right) = if dir > 0.0 {
-            (color.gamma_multiply(alpha), Color32::TRANSPARENT)
-        } else {
-            (Color32::TRANSPARENT, color.gamma_multiply(alpha))
-        };
-        widgets::gradient_rect(painter, streak, left, right);
-        let edge = if dir > 0.0 {
-            streak.left()
-        } else {
-            streak.right()
-        };
-        painter.line_segment(
-            [
-                egui::pos2(edge, full.top()),
-                egui::pos2(edge, full.bottom()),
-            ],
-            egui::Stroke::new(2.0, Color32::WHITE.gamma_multiply(alpha)),
-        );
     }
 }
