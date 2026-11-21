@@ -9,7 +9,7 @@ use super::calibration::{Calibration, CalibrationEvent};
 use crate::app::Shared;
 use crate::input::{FrameInput, MenuAction};
 use crate::ui::theme::{self, ACCENT_B, COLUMN_COLORS, SUCCESS, font, font_bold};
-use crate::ui::{anim, notefield, widgets};
+use crate::ui::{anim, beatfx, notefield, widgets};
 
 const STEP_TITLES: [&str; 3] = ["Kontrol", "Sinkronisasi", "Mulai main"];
 
@@ -51,27 +51,76 @@ impl OnboardingScreen {
             self.lit[usize::from(c.column.min(3))] = Some(c.at);
         }
 
-        // Progress dots
+        let reduce = shared.settings.reduce_motion;
+        let mut beat = beatfx::Beat::idle(anim::since(shared.start, now));
+        if reduce {
+            beat = beat.calm();
+        } else {
+            ui.ctx().request_repaint();
+        }
+        if palette.dark {
+            beatfx::draw_highway(ui.painter(), rect, COLUMN_COLORS[self.step.min(3)], &beat);
+        }
+
+        // Steps drawn as notes on a track: arrows joined by a line.
         let top = rect.top() + 48.0;
+        let xs: Vec<f32> = (0..STEP_TITLES.len())
+            .map(|i| rect.center().x + (i as f32 - 1.0) * 160.0)
+            .collect();
+        for w in xs.windows(2).enumerate() {
+            let (i, pair) = w;
+            let done = i < self.step;
+            ui.painter().line_segment(
+                [pos2(pair[0] + 18.0, top), pos2(pair[1] - 18.0, top)],
+                Stroke::new(
+                    2.0,
+                    if done {
+                        SUCCESS
+                    } else {
+                        palette.text_dim.gamma_multiply(0.3)
+                    },
+                ),
+            );
+        }
         for (i, title) in STEP_TITLES.iter().enumerate() {
-            let x = rect.center().x + (i as f32 - 1.0) * 160.0;
+            let x = xs[i];
             let active = i == self.step;
             let done = i < self.step;
-            let color = if done {
-                SUCCESS
-            } else if active {
-                ACCENT_B
-            } else {
-                palette.text_dim.gamma_multiply(0.5)
-            };
-            ui.painter()
-                .circle_filled(pos2(x, top), if active { 7.0 } else { 5.0 }, color);
+            let col = COLUMN_COLORS[i];
+            let center = pos2(x, top);
+            if active {
+                notefield::draw_glow(ui.painter(), center, 22.0, col, 0.5 + 0.5 * beat.pulse);
+            }
+            notefield::draw_arrow(
+                ui.painter(),
+                center,
+                if active { 30.0 } else { 24.0 },
+                // Right-pointing arrow: "forward".
+                3,
+                if done || active {
+                    col
+                } else {
+                    col.gamma_multiply(0.15)
+                },
+                Stroke::new(
+                    1.2,
+                    if done || active {
+                        col
+                    } else {
+                        col.gamma_multiply(0.5)
+                    },
+                ),
+            );
             ui.painter().text(
-                pos2(x, top + 18.0),
+                pos2(x, top + 22.0),
                 Align2::CENTER_TOP,
                 *title,
                 font(theme::TEXT_XS + 1.0),
-                color,
+                if active || done {
+                    palette.text
+                } else {
+                    palette.text_dim
+                },
             );
         }
         let skip = Rect::from_min_size(
@@ -307,8 +356,31 @@ fn start_step(ui: &mut Ui, shared: &mut Shared, input: &FrameInput, area: Rect) 
         font(theme::TEXT_M),
         palette.text_dim,
     );
+    // Four arrows lighting up in turn: a taste of the game.
+    let beat = beatfx::Beat::idle(anim::since(shared.start, input.now));
+    let current = beat.beat.rem_euclid(4.0).floor() as u8;
+    for c in 0..4u8 {
+        let center = area.center_top() + vec2((f32::from(c) - 1.5) * 64.0, 120.0);
+        let color = COLUMN_COLORS[usize::from(c)];
+        let lit = c == current && !shared.settings.reduce_motion;
+        if lit {
+            notefield::radial_light(&painter, center, 54.0, color, 0.7 * beat.pulse.max(0.3));
+        }
+        notefield::draw_arrow(
+            &painter,
+            center,
+            44.0,
+            c,
+            if lit {
+                color
+            } else {
+                color.gamma_multiply(0.2)
+            },
+            Stroke::new(1.5, color),
+        );
+    }
     let tile = vec2(400.0, 96.0);
-    let a = Rect::from_center_size(area.center() + vec2(0.0, -10.0), tile);
+    let a = Rect::from_center_size(area.center() + vec2(0.0, 30.0), tile);
     let b = a.translate(vec2(0.0, tile.y + 16.0));
     let mut nav = None;
     if ui
