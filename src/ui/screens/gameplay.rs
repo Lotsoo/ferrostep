@@ -65,6 +65,9 @@ pub struct GameplayScreen {
     milestone_sounded: u32,
 }
 
+/// Width reserved on each side for the HUD cards (24 px margin + 330 px card + gap).
+const HUD_SIDE: f32 = 372.0;
+
 impl GameplayScreen {
     /// True while the pause menu is open.
     pub fn is_paused(&self) -> bool {
@@ -409,7 +412,13 @@ impl GameplayScreen {
         let dt = ui.input(|i| i.stable_dt);
         let time = anim::since(shared.start, now);
 
-        let layout = Layout::new(rect, self.columns, shared.settings.reverse);
+        let scale = shared
+            .settings
+            .lane_size
+            .scale(shared.gamepad_name.is_some());
+        // Keep a big lane clear of the song card (left) and score card (right).
+        let layout = Layout::new(rect, self.columns, shared.settings.reverse, scale)
+            .limit_width(self.columns, rect.width() - 2.0 * HUD_SIDE);
         let beat = self.timing.seconds_to_beat(self.song_time);
         let pulse = if reduce {
             0.0
@@ -456,10 +465,10 @@ impl GameplayScreen {
         }
 
         let feedback = self.feedback_anchor(&layout, rect);
-        self.draw_judgment(&painter, feedback, now, reduce);
+        self.draw_judgment(&painter, feedback, layout.scale(), now, reduce);
         hud::draw_hit_meter(
             &painter,
-            feedback + vec2(0.0, 132.0),
+            feedback + vec2(0.0, 132.0 * layout.scale()),
             &self.hud,
             shared.settings.judge_scale,
             now,
@@ -531,7 +540,15 @@ impl GameplayScreen {
         pos2(layout.left + layout.width(self.columns) / 2.0, y)
     }
 
-    fn draw_judgment(&self, painter: &egui::Painter, pos: egui::Pos2, now: Instant, reduce: bool) {
+    /// Judgment word and combo; `k` is the lane scale (bigger lane, bigger text).
+    fn draw_judgment(
+        &self,
+        painter: &egui::Painter,
+        pos: egui::Pos2,
+        k: f32,
+        now: Instant,
+        reduce: bool,
+    ) {
         let score = &self.session.score;
         if let Some((judgment, at)) = self.last_judgment {
             let age = anim::since(at, now);
@@ -548,13 +565,13 @@ impl GameplayScreen {
                     let shimmer = 0.5 + 0.5 * (anim::since(at, now) * 14.0).sin();
                     color = color.lerp_to_gamma(Color32::WHITE, shimmer * 0.6);
                 }
-                notefield::draw_glow(painter, pos, 46.0 * pop, color, alpha * 0.9);
+                notefield::draw_glow(painter, pos, 46.0 * k * pop, color, alpha * 0.9);
                 widgets::text_tracked_scaled(
                     painter,
                     pos,
                     Align2::CENTER_CENTER,
                     judgment.label(),
-                    font_bold(36.0),
+                    font_bold(36.0 * k),
                     color.gamma_multiply(alpha),
                     pop,
                 );
@@ -569,10 +586,10 @@ impl GameplayScreen {
                     };
                     widgets::text_tracked(
                         painter,
-                        pos + vec2(0.0, -32.0),
+                        pos + vec2(0.0, -32.0 * k),
                         Align2::CENTER_CENTER,
                         &format!("{word}  {:.0} ms", ms.abs()),
-                        font_bold(11.0),
+                        font_bold(11.0 * k),
                         c.gamma_multiply(alpha),
                     );
                 }
@@ -596,27 +613,27 @@ impl GameplayScreen {
             } else {
                 Color32::WHITE.gamma_multiply(0.9)
             };
-            let center = pos + vec2(0.0, 58.0);
+            let center = pos + vec2(0.0, 58.0 * k);
             if let Some((_, age)) = self.hud.milestone(now).filter(|_| !reduce) {
                 let e = anim::ease_out_cubic((age / 0.9).min(1.0));
                 let fade = (1.0 - age / 0.9).max(0.0);
                 painter.circle_stroke(
                     center,
-                    30.0 + e * 120.0,
+                    (30.0 + e * 120.0) * k,
                     Stroke::new(3.0 * fade, theme::ACCENT_B.gamma_multiply(fade)),
                 );
-                notefield::draw_glow(painter, center, 60.0, theme::ACCENT_A, fade * 1.5);
+                notefield::draw_glow(painter, center, 60.0 * k, theme::ACCENT_A, fade * 1.5);
             }
             widgets::tabular_text_scaled(
                 painter,
                 center,
                 Align2::CENTER_CENTER,
                 &combo.to_string(),
-                font_bold(50.0),
+                font_bold(50.0 * k),
                 color,
                 bump,
             );
-            let label_pos = center + vec2(0.0, 36.0);
+            let label_pos = center + vec2(0.0, 36.0 * k);
             match self.hud.milestone(now) {
                 Some((c, age)) => {
                     let a = (1.4 - age).clamp(0.0, 1.0);
@@ -625,7 +642,7 @@ impl GameplayScreen {
                         label_pos,
                         Align2::CENTER_CENTER,
                         hud::milestone_word(c),
-                        font_bold(theme::TEXT_S),
+                        font_bold(theme::TEXT_S * k),
                         theme::ACCENT_B
                             .lerp_to_gamma(Color32::WHITE, 0.3)
                             .gamma_multiply(a),
@@ -637,7 +654,7 @@ impl GameplayScreen {
                         label_pos,
                         Align2::CENTER_CENTER,
                         "COMBO",
-                        font_bold(11.0),
+                        font_bold(11.0 * k),
                         color.gamma_multiply(0.55),
                     );
                 }

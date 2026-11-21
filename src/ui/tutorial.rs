@@ -473,8 +473,14 @@ impl Tutorial {
         // The lane.
         let lane_top = rect.top() + 70.0 + text_h + 16.0;
         let lane_rect = Rect::from_min_max(pos2(rect.left(), lane_top), rect.max);
-        let mut layout = Layout::new(lane_rect, 4, false);
-        layout.arrow = (lane_rect.height() / 5.2).clamp(56.0, 96.0);
+        let scale = shared
+            .settings
+            .lane_size
+            .scale(shared.gamepad_name.is_some());
+        let mut layout = Layout::new(lane_rect, 4, false, 1.0);
+        layout.arrow = ((lane_rect.height() / 5.2).clamp(56.0, 96.0) * scale)
+            .min(lane_rect.height() / 4.2)
+            .min(lane_rect.width() * 0.85 / 4.8);
         layout.lane = layout.arrow * 1.2;
         layout.left = lane_rect.center().x - layout.lane * 2.0;
         layout.receptor_y = lane_rect.top() + layout.arrow * 0.75;

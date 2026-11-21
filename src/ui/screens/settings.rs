@@ -9,7 +9,7 @@ use eframe::egui::{self, Align2, Key, Rect, Sense, Stroke, StrokeKind, Ui, UiBui
 use super::Nav;
 use super::calibration::{Calibration, CalibrationEvent};
 use crate::app::Shared;
-use crate::config::{GraphicsBackend, ScrollMode, Settings, ThemeChoice};
+use crate::config::{GraphicsBackend, LaneSize, ScrollMode, Settings, ThemeChoice};
 use crate::importer::ffmpeg;
 use crate::input::{FrameInput, MenuAction};
 use crate::library::{Library, songs_dir};
@@ -985,6 +985,29 @@ fn display_section(ui: &mut Ui, shared: &mut Shared) {
             // Apply when the drag ends so the slider does not jump under the mouse.
             if resp.drag_stopped() || (resp.changed() && !resp.dragged()) {
                 s.ui_scale = (pct / 100.0) as f32;
+            }
+        },
+    );
+    setting_row(
+        ui,
+        &palette,
+        "Ukuran jalur",
+        "Besar panah, judgment, dan combo saat bermain. Otomatis = lebih besar saat dance mat terhubung (main dari jauh, mis. laptop ke TV). Kecepatan baca panah tetap sama.",
+        |ui| {
+            const SIZES: [LaneSize; 4] = [
+                LaneSize::Auto,
+                LaneSize::Normal,
+                LaneSize::Large,
+                LaneSize::Huge,
+            ];
+            let mut i = SIZES.iter().position(|v| *v == s.lane_size).unwrap_or(0);
+            if widgets::segmented(
+                ui,
+                &palette,
+                &["Otomatis", "Normal", "Besar", "Sangat besar"],
+                &mut i,
+            ) {
+                s.lane_size = SIZES[i];
             }
         },
     );

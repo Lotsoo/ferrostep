@@ -219,3 +219,10 @@ Di sesi Wayland, zona impor otomatis berganti teks "Klik untuk memilih file" (di
 - **Kalibrasi baru:** metronom = satu track audio (posisinya jadi jam, sama seperti gameplay). Alur: penjelasan 3 langkah → hitungan 4-3-2-1 → 16 ketukan (tanpa denyut visual, hanya umpan balik) → hasil "Simpan/Ulangi/Batal". Ketukan kurang → diminta coba lagi. `--open calibrate`.
 - **Tutorial interaktif (`ui/tutorial.rs`):** 6 pelajaran; panah berhenti dan menunggu di target sampai ditekan (gaya Piano Tiles), tiap tekanan memainkan nada melodi "Twinkle Twinkle" (tradisional). Ada di onboarding (langkah ke-2) dan di menu utama (tombol "Tutorial"); `--open tutorial`.
 - Belum diuji: kalibrasi & tutorial dengan dance mat sungguhan; terasa/tidaknya kelancaran di sesi Wayland asli (pengujian di XWayland).
+
+## Sesi 2026-11-21 (lanjutan) — video, terompet, ukuran jalur
+- Video ucapan: tidak lagi membeku bila audio macet atau thread decoder kekurangan CPU (UI mengambil alih decode); frame pertama tiap video langsung tampil.
+- Titik halaman (surat & video) memakai `widgets::page_dots`: jarak rata, pil bergeser halus.
+- Terompet diganti versi FLAC baru; hening 0,83 s di awal dipotong saat build (`convert_audio(.., trim_start)`) agar loop menyambung. Loop terverifikasi (kembali ke 0 setelah ±21,5 s); berhenti hanya saat tombol "Ayo main".
+- **Ukuran jalur** (Pengaturan → Tampilan): Otomatis / Normal / Besar / Sangat besar (1,0 / 1,25 / 1,5; Otomatis = 1,3 saat dance mat terhubung). Panah, judgment, combo, hit meter ikut membesar; kecepatan scroll memakai ukuran dasar (`Layout::base_arrow`) sehingga waktu baca tetap sama. Di jendela kecil jalur dibatasi agar tidak menabrak kartu HUD (`Layout::limit_width`).
+- Belum diuji: tampilan di TV sungguhan; baris pengaturan baru belum dilihat lewat screenshot.

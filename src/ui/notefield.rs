@@ -108,14 +108,24 @@ pub struct Layout {
     pub lane: f32,
     pub left: f32,
     pub receptor_y: f32,
+    /// Arrow size before the lane-size setting: scroll speed is based on it,
+    /// so a bigger lane does not shorten the time to read the notes.
+    pub base_arrow: f32,
     /// +1 when notes travel upwards, -1 in reverse mode.
     pub dir: f32,
     pub rect: Rect,
 }
 
 impl Layout {
-    pub fn new(rect: Rect, columns: u8, reverse: bool) -> Self {
-        let arrow = (rect.height() / 8.5).clamp(44.0, 112.0);
+    /// Lane centered in `rect`; `scale` is the lane-size setting
+    /// ([`crate::config::LaneSize::scale`]), limited so the lane always fits.
+    pub fn new(rect: Rect, columns: u8, reverse: bool, scale: f32) -> Self {
+        let base_arrow = (rect.height() / 8.5).clamp(44.0, 112.0);
+        let fit_width = rect.width() * 0.9 / (1.12 * f32::from(columns.max(1)));
+        let arrow = (base_arrow * scale.clamp(0.5, 2.0))
+            .min(fit_width)
+            .min(rect.height() / 5.5)
+            .max(base_arrow.min(fit_width));
         let lane = arrow * 1.12;
         let width = lane * f32::from(columns);
         let receptor_y = if reverse {
@@ -128,6 +138,7 @@ impl Layout {
             lane,
             left: rect.center().x - width / 2.0,
             receptor_y,
+            base_arrow,
             dir: if reverse { -1.0 } else { 1.0 },
             rect,
         }
@@ -139,6 +150,27 @@ impl Layout {
 
     pub fn width(&self, columns: u8) -> f32 {
         self.lane * f32::from(columns)
+    }
+
+    /// Shrinks a scaled-up lane to at most `max_width` (e.g. to keep clear
+    /// of HUD cards in a small window), never below the normal size.
+    pub fn limit_width(mut self, columns: u8, max_width: f32) -> Self {
+        let cols = f32::from(columns.max(1));
+        let arrow = (max_width / (1.12 * cols))
+            .max(self.base_arrow)
+            .min(self.arrow);
+        let center = self.left + self.lane * cols / 2.0;
+        let edge = self.receptor_y - self.dir * self.arrow * 1.3;
+        self.arrow = arrow;
+        self.lane = arrow * 1.12;
+        self.left = center - self.lane * cols / 2.0;
+        self.receptor_y = edge + self.dir * arrow * 1.3;
+        self
+    }
+
+    /// How much bigger than normal the lane is drawn (1.0 = normal).
+    pub fn scale(&self) -> f32 {
+        self.arrow / self.base_arrow
     }
 }
 
@@ -155,8 +187,8 @@ pub struct Scroll<'a> {
 impl<'a> Scroll<'a> {
     pub fn new(settings: &Settings, layout: &Layout, timing: &'a TimingMap, now_time: f64) -> Self {
         let speed = match settings.scroll_mode {
-            ScrollMode::CMod => settings.cmod / 60.0 * layout.arrow,
-            ScrollMode::XMod => settings.xmod * layout.arrow,
+            ScrollMode::CMod => settings.cmod / 60.0 * layout.base_arrow,
+            ScrollMode::XMod => settings.xmod * layout.base_arrow,
         };
         Self {
             mode: settings.scroll_mode,

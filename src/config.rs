@@ -22,6 +22,29 @@ pub enum ThemeChoice {
     Light,
 }
 
+/// Size of the note lane (arrows, judgment, combo).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum LaneSize {
+    /// Normal on a keyboard, large while a dance mat is connected (players
+    /// on a mat usually stand back from the screen, e.g. a TV).
+    Auto,
+    Normal,
+    Large,
+    Huge,
+}
+
+impl LaneSize {
+    /// Size multiplier for the lane; `pad_connected` matters for `Auto`.
+    pub fn scale(self, pad_connected: bool) -> f32 {
+        match self {
+            Self::Auto if pad_connected => 1.3,
+            Self::Auto | Self::Normal => 1.0,
+            Self::Large => 1.25,
+            Self::Huge => 1.5,
+        }
+    }
+}
+
 /// Graphics API preference (applied at the next start).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum GraphicsBackend {
@@ -57,6 +80,8 @@ pub struct Settings {
     /// Custom ffmpeg binary. `None` = search automatically.
     pub ffmpeg_path: Option<PathBuf>,
     pub ui_scale: f32,
+    /// Note lane size (see [`LaneSize`]).
+    pub lane_size: LaneSize,
     pub reduce_motion: bool,
     pub show_fps: bool,
     pub vsync: bool,
@@ -92,6 +117,7 @@ impl Default for Settings {
             songs_dir: None,
             ffmpeg_path: None,
             ui_scale: 1.0,
+            lane_size: LaneSize::Auto,
             reduce_motion: false,
             show_fps: false,
             vsync: true,
