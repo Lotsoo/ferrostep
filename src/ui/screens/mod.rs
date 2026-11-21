@@ -48,6 +48,8 @@ pub enum Nav {
     Play(PlayRequest),
     Results(Box<ResultData>),
     Settings,
+    /// Settings, straight into the offset calibration.
+    Calibrate,
     /// Mapping wizard for a dance mat.
     PadSetup {
         key: String,

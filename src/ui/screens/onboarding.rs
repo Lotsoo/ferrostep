@@ -310,7 +310,7 @@ impl OnboardingScreen {
                 .clicked()
                 || input.has(MenuAction::Confirm)
             {
-                self.calibration = Some(Calibration::default());
+                self.calibration = Some(Calibration::without_intro());
             }
             let skip = Rect::from_center_size(area.center() + vec2(130.0, 40.0), vec2(180.0, 44.0));
             if ui

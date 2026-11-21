@@ -244,6 +244,7 @@ impl FerrostepApp {
             Some("songs") => app.navigate(Nav::SongSelect),
             Some("import") => app.navigate(Nav::Import(Vec::new())),
             Some("settings") => app.navigate(Nav::Settings),
+            Some("calibrate") => app.navigate(Nav::Calibrate),
             Some(other) => log::warn!("--open: unknown screen '{other}'"),
             None => {}
         }
@@ -319,6 +320,7 @@ impl FerrostepApp {
                 Screen::Import(Box::new(ImportScreen::new(files, &self.shared)))
             }
             Nav::Settings => Screen::Settings(Box::new(SettingsScreen::new(None))),
+            Nav::Calibrate => Screen::Settings(Box::new(SettingsScreen::calibrating())),
             Nav::PadSetup {
                 key,
                 name,

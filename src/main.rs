@@ -75,7 +75,7 @@ Pemakaian: ferrostep [opsi]
   --play <folder lagu>    Langsung mainkan lagu di folder itu (untuk pengujian)
   --chart <nomor>         Pilih chart (indeks di simfile) untuk --play
   --autoplay              Game menekan panah sendiri (skor tidak disimpan)
-  --open <layar>          Buka langsung: songs, import, atau settings
+  --open <layar>          Buka langsung: songs, import, settings, atau calibrate
   <file.mp3> <file.mp4>…  Impor file-file tersebut (bisa lebih dari satu)
   -h, --help              Tampilkan bantuan ini
 

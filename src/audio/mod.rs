@@ -197,6 +197,57 @@ impl Audio {
         })
     }
 
+    /// Plays a metronome as one audio track: `lead` seconds of silence, then
+    /// `beats` clicks at `bpm` (every 4th accented). Its position is a precise
+    /// clock for calibration: the clicks are exactly where the track says.
+    pub fn play_metronome(&mut self, bpm: f64, lead: f64, beats: usize) -> Result<Music> {
+        let rate = SYNTH_SAMPLE_RATE as f64;
+        let period = 60.0 / bpm;
+        let total = ((lead + period * beats as f64 + 0.5) * rate) as usize;
+        let mut samples = vec![0.0f32; total];
+        for k in 0..beats {
+            let (freq, amp) = if k % 4 == 0 {
+                (1760.0, 0.7)
+            } else {
+                (1320.0, 0.5)
+            };
+            let start = ((lead + k as f64 * period) * rate) as usize;
+            let len = (0.045 * rate) as usize;
+            for i in 0..len {
+                let t = i as f32 / SYNTH_SAMPLE_RATE as f32;
+                // Instant attack (the click is sharp), quick exponential decay.
+                let env = (-t * 90.0).exp() * (i as f32 / 8.0).min(1.0);
+                if let Some(s) = samples.get_mut(start + i) {
+                    *s = (TAU * freq * t).sin() * amp * env;
+                }
+            }
+        }
+        let mut wav = Vec::new();
+        {
+            let spec = hound::WavSpec {
+                channels: 1,
+                sample_rate: SYNTH_SAMPLE_RATE,
+                bits_per_sample: 16,
+                sample_format: hound::SampleFormat::Int,
+            };
+            let mut writer = hound::WavWriter::new(std::io::Cursor::new(&mut wav), spec)
+                .context("could not build the metronome")?;
+            for s in samples {
+                writer
+                    .write_sample((s.clamp(-1.0, 1.0) * f32::from(i16::MAX)) as i16)
+                    .context("could not build the metronome")?;
+            }
+            writer.finalize().context("could not build the metronome")?;
+        }
+        let data = StreamingSoundData::from_cursor(std::io::Cursor::new(wav))
+            .context("could not decode the metronome")?;
+        let handle = self.manager.play(data).map_err(|e| anyhow!("{e}"))?;
+        Ok(Music {
+            handle,
+            fading: false,
+        })
+    }
+
     /// Plays a metronome click (used by the calibration wizard).
     pub fn click(&mut self, accent: bool) {
         let sound = if accent {
