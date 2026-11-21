@@ -149,6 +149,71 @@ impl Library {
         self.highlight = Some((dir, Instant::now()));
         self.rescan();
     }
+
+    /// Permanently deletes one song folder from disk and removes it from the
+    /// list right away (the watcher rescan follows).
+    pub fn delete_song(&mut self, dir: &Path) -> std::io::Result<()> {
+        delete_song_dir(&self.root, dir)?;
+        self.songs.retain(|s| s.dir != dir);
+        self.generation += 1;
+        Ok(())
+    }
+}
+
+/// Deletes `dir` and everything in it, but only when it is safely a single
+/// song folder: strictly inside `root` (not `root` itself, not a group folder
+/// holding other songs) and containing a simfile. Anything else is refused so a
+/// bug can never wipe the whole library or a folder outside it.
+pub fn delete_song_dir(root: &Path, dir: &Path) -> std::io::Result<()> {
+    use std::io::{Error, ErrorKind};
+    let root = root.canonicalize()?;
+    let dir = dir.canonicalize()?;
+    let depth = dir
+        .strip_prefix(&root)
+        .map_err(|_| Error::new(ErrorKind::PermissionDenied, "folder is outside Songs/"))?
+        .components()
+        .count();
+    if !(1..=2).contains(&depth) {
+        return Err(Error::new(
+            ErrorKind::PermissionDenied,
+            "not a song folder (must be Songs/<song> or Songs/<group>/<song>)",
+        ));
+    }
+    let mut has_simfile = false;
+    for entry in std::fs::read_dir(&dir)? {
+        let path = entry?.path();
+        if path.is_dir()
+            && std::fs::read_dir(&path)?
+                .flatten()
+                .any(|e| is_simfile(&e.path()))
+        {
+            return Err(Error::new(
+                ErrorKind::PermissionDenied,
+                "folder contains other songs (it is a group folder)",
+            ));
+        }
+        has_simfile |= is_simfile(&path);
+    }
+    if !has_simfile {
+        return Err(Error::new(
+            ErrorKind::PermissionDenied,
+            "no .sm/.ssc file in this folder",
+        ));
+    }
+    std::fs::remove_dir_all(&dir)?;
+    // A group folder left empty goes too (remove_dir refuses non-empty ones).
+    if depth == 2
+        && let Some(group) = dir.parent()
+    {
+        let _ = std::fs::remove_dir(group);
+    }
+    Ok(())
+}
+
+fn is_simfile(path: &Path) -> bool {
+    path.extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| e.eq_ignore_ascii_case("sm") || e.eq_ignore_ascii_case("ssc"))
 }
 
 /// Audio extensions the game can play.
@@ -218,4 +283,50 @@ fn is_writable_dir(dir: &Path) -> bool {
     let ok = std::fs::write(&probe, b"").is_ok();
     let _ = std::fs::remove_file(&probe);
     ok
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn song(dir: &Path) {
+        std::fs::create_dir_all(dir).unwrap();
+        std::fs::write(dir.join("song.sm"), "#TITLE:x;").unwrap();
+        std::fs::write(dir.join("song.ogg"), b"audio").unwrap();
+    }
+
+    #[test]
+    fn deletes_only_a_single_song_folder() {
+        let tmp = std::env::temp_dir().join(format!("ferrostep-del-{}", std::process::id()));
+        let root = tmp.join("Songs");
+        let a = root.join("Imported").join("A");
+        let b = root.join("Imported").join("B");
+        let loose = root.join("Loose");
+        song(&a);
+        song(&b);
+        song(&loose);
+        let outside = tmp.join("Outside");
+        song(&outside);
+
+        // Refused: the root, a group folder, a folder outside, a non-song folder.
+        assert!(delete_song_dir(&root, &root).is_err());
+        assert!(delete_song_dir(&root, &root.join("Imported")).is_err());
+        assert!(delete_song_dir(&root, &outside).is_err());
+        assert!(delete_song_dir(&root, &root.join("Imported/A/../../../Outside")).is_err());
+        std::fs::create_dir_all(root.join("Empty")).unwrap();
+        assert!(delete_song_dir(&root, &root.join("Empty")).is_err());
+
+        // Allowed: one song; its neighbours stay.
+        delete_song_dir(&root, &a).unwrap();
+        assert!(!a.exists());
+        assert!(b.join("song.sm").exists());
+        assert!(root.join("Imported").exists(), "group still holds B");
+        delete_song_dir(&root, &b).unwrap();
+        assert!(!root.join("Imported").exists(), "empty group removed");
+        assert!(root.exists());
+        delete_song_dir(&root, &loose).unwrap();
+        assert!(!loose.exists());
+        assert!(outside.exists());
+        std::fs::remove_dir_all(&tmp).unwrap();
+    }
 }
