@@ -63,6 +63,8 @@ pub struct Shared {
     pub connected_pads: Vec<(String, String)>,
     /// AutoPlay mode from the command line.
     pub autoplay: bool,
+    /// The welcome letter or greeting videos are showing: no title music.
+    pub hold_music: bool,
     /// Theme and UI scale currently applied to egui.
     applied_look: (crate::config::ThemeChoice, f32),
 }
@@ -117,6 +119,10 @@ struct QuitDialog {
 pub struct FerrostepApp {
     /// Welcome letter shown on every start (private builds only); blocks everything else.
     letter: Option<crate::ui::letter::Letter>,
+    /// Looping trumpet that plays while the letter is open.
+    letter_music: Option<crate::audio::Music>,
+    /// Greeting videos after the letter (private builds only); unskippable.
+    greetings: Option<crate::ui::gift::Greetings>,
     quit_dialog: Option<QuitDialog>,
     /// Set once the player confirmed; the next close request goes through.
     allow_close: bool,
@@ -203,6 +209,7 @@ impl FerrostepApp {
                 save_pad_profile: None,
                 connected_pads: Vec::new(),
                 autoplay: launch.autoplay,
+                hold_music: false,
                 applied_look: (settings_theme, settings_scale),
             },
             input: InputHub::new(&cc.egui_ctx),
@@ -211,6 +218,8 @@ impl FerrostepApp {
             transition: anim::Spring::new(1.0, anim::Spring::SMOOTH),
             last_hover: None,
             letter: None,
+            letter_music: None,
+            greetings: None,
             quit_dialog: None,
             allow_close: false,
             transition_dir: 1.0,
@@ -219,6 +228,15 @@ impl FerrostepApp {
             fps_work: 0.0,
         };
         app.letter = crate::ui::letter::Letter::new(now);
+        if app.letter.is_some()
+            && let (Some(trumpet), Some(audio)) = (crate::ui::gift::TRUMPET, &mut app.shared.audio)
+        {
+            match audio.play_bytes(trumpet, true, 800) {
+                Ok(music) => app.letter_music = Some(music),
+                Err(e) => log::warn!("letter music: {e:#}"),
+            }
+        }
+        app.shared.hold_music = app.letter.is_some();
         if !launch.import.is_empty() {
             app.navigate(Nav::Import(launch.import.clone()));
         }
@@ -616,12 +634,15 @@ impl eframe::App for FerrostepApp {
             // The welcome letter must be read to the end before anything else.
             if let Some(letter) = &mut self.letter {
                 letter.nudge(input.now);
+            } else if let Some(greetings) = &mut self.greetings {
+                greetings.nudge(input.now);
             } else {
                 self.open_quit_dialog();
             }
         }
         // While the dialog is open, screens get no keys or steps.
-        let screen_input = if self.quit_dialog.is_some() || self.letter.is_some() {
+        self.shared.hold_music = self.letter.is_some() || self.greetings.is_some();
+        let screen_input = if self.quit_dialog.is_some() || self.shared.hold_music {
             let mut quiet = input.clone();
             quiet.menu.clear();
             quiet.columns.clear();
@@ -685,6 +706,19 @@ impl eframe::App for FerrostepApp {
             let reduce = self.shared.settings.reduce_motion;
             if letter.ui(&ctx, &palette, &input, reduce) {
                 self.letter = None;
+                if let Some(mut music) = self.letter_music.take() {
+                    music.fade_out(500);
+                }
+                self.greetings = crate::ui::gift::Greetings::new(now);
+                if self.greetings.is_none() {
+                    self.shared.sfx(Sfx::Success);
+                }
+            }
+        } else if let Some(greetings) = &mut self.greetings {
+            let palette = self.shared.palette;
+            let reduce = self.shared.settings.reduce_motion;
+            if greetings.ui(&ctx, &palette, self.shared.audio.as_mut(), now, reduce) {
+                self.greetings = None;
                 self.shared.sfx(Sfx::Success);
             }
         }

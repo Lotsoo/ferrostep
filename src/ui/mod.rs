@@ -3,6 +3,7 @@
 pub mod anim;
 pub mod beatfx;
 pub mod fonts;
+pub mod gift;
 pub mod hud;
 pub mod letter;
 pub mod notefield;

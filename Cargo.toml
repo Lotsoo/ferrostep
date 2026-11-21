@@ -29,6 +29,8 @@ serde_json = "1.0.154"
 symphonia = { version = "0.6.1", features = ["mp3", "aac", "isomp4", "ogg", "vorbis", "wav", "flac", "pcm"] }
 thiserror = "2.0.21"
 toml = "1.2.1"
+zune-core = "0.5"
+zune-jpeg = "0.5"
 
 # Light optimisation for our code and full optimisation for dependencies in
 # debug builds: keeps `cargo run`/`cargo test` fast (FFT, decoding) while

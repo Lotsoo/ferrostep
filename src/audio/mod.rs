@@ -174,6 +174,29 @@ impl Audio {
         })
     }
 
+    /// Streams audio embedded in the binary (e.g. Ogg data from `include_bytes!`).
+    /// With `looped`, it repeats until stopped.
+    pub fn play_bytes(
+        &mut self,
+        bytes: &'static [u8],
+        looped: bool,
+        fade_in_ms: u64,
+    ) -> Result<Music> {
+        let mut data = StreamingSoundData::from_cursor(std::io::Cursor::new(bytes))
+            .context("could not decode embedded audio")?;
+        if looped {
+            data = data.loop_region(..);
+        }
+        if fade_in_ms > 0 {
+            data = data.fade_in_tween(tween_ms(fade_in_ms));
+        }
+        let handle = self.manager.play(data).map_err(|e| anyhow!("{e}"))?;
+        Ok(Music {
+            handle,
+            fading: false,
+        })
+    }
+
     /// Plays a metronome click (used by the calibration wizard).
     pub fn click(&mut self, accent: bool) {
         let sound = if accent {

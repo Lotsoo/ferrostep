@@ -57,7 +57,7 @@ impl Drop for TitleScreen {
 impl TitleScreen {
     /// Starts a random song's preview once the library has loaded.
     fn start_music(&mut self, shared: &mut Shared) {
-        if self.music_tried || !shared.library.loaded_once {
+        if self.music_tried || !shared.library.loaded_once || shared.hold_music {
             return;
         }
         self.music_tried = true;

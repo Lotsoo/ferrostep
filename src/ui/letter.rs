@@ -27,6 +27,8 @@ const RAW: &str = include_str!(concat!(env!("OUT_DIR"), "/letter.txt"));
 
 const HEADING_SIZE: f32 = 40.0;
 const BODY_SIZE: f32 = 25.0;
+/// Horizontal padding of a highlight marker (and the gap kept around it).
+const MARK_PAD: f32 = 5.0;
 
 /// One page of the letter.
 #[derive(Debug, Clone, PartialEq)]
@@ -379,12 +381,16 @@ impl Letter {
             }
             let mut job = LayoutJob::default();
             job.wrap.max_width = rect.width();
+            let mut marks = Vec::new();
+            let mut chars = 0;
+            let mut after_mark = false;
             for (text, highlighted) in segments(line) {
+                let len = text.chars().count();
                 let format = if highlighted {
+                    marks.push(chars..chars + len);
                     TextFormat {
                         font_id: body_font.clone(),
-                        color: fade(Color32::from_rgb(0x14, 0x10, 0x24)),
-                        background: fade(accent.lerp_to_gamma(Color32::WHITE, 0.15)),
+                        color: fade(highlight_text(accent, palette)),
                         line_height: Some(BODY_SIZE * 1.45),
                         ..Default::default()
                     }
@@ -396,10 +402,20 @@ impl Letter {
                         ..Default::default()
                     }
                 };
-                job.append(text, 0.0, format);
+                chars += len;
+                // Breathing room so a marker never touches the next word.
+                let gap = if (highlighted && chars > len) || after_mark {
+                    MARK_PAD
+                } else {
+                    0.0
+                };
+                after_mark = highlighted;
+                job.append(text, gap, format);
             }
             let galley = painter.layout_job(job);
-            painter.galley(pos2(rect.left(), y), galley.clone(), Color32::WHITE);
+            let origin = pos2(rect.left(), y);
+            draw_marks(painter, &galley, origin, &marks, accent, alpha);
+            painter.galley(origin, galley.clone(), Color32::WHITE);
             y += galley.size().y + 10.0;
         }
 
@@ -415,8 +431,70 @@ impl Letter {
     }
 }
 
+/// Highlighted words: the column color, brightened so it reads on the card.
+fn highlight_text(accent: Color32, palette: &Palette) -> Color32 {
+    if palette.dark {
+        accent.lerp_to_gamma(Color32::WHITE, 0.2)
+    } else {
+        accent.lerp_to_gamma(Color32::BLACK, 0.35)
+    }
+}
+
+/// Paints a soft rounded "marker" behind each highlighted run of characters
+/// (`marks` are char ranges of the laid-out line), one piece per wrapped row.
+fn draw_marks(
+    painter: &egui::Painter,
+    galley: &egui::Galley,
+    origin: egui::Pos2,
+    marks: &[std::ops::Range<usize>],
+    accent: Color32,
+    alpha: f32,
+) {
+    if marks.is_empty() {
+        return;
+    }
+    let glyphs: usize = galley.rows.iter().map(|r| r.glyphs.len()).sum();
+    if glyphs != galley.job.text.chars().count() {
+        return; // Unexpected layout: keep the colored text only.
+    }
+    let mut index = 0;
+    for row in &galley.rows {
+        let mut run: Option<Rect> = None;
+        let flush = |run: &mut Option<Rect>| {
+            if let Some(r) = run.take() {
+                let r = r.expand2(vec2(MARK_PAD, 1.0));
+                painter.rect_filled(r, 9, accent.gamma_multiply(0.2 * alpha));
+                let underline = Rect::from_min_max(
+                    pos2(r.left() + 4.0, r.bottom() - 2.5),
+                    pos2(r.right() - 4.0, r.bottom()),
+                );
+                painter.rect_filled(underline, 2, accent.gamma_multiply(0.85 * alpha));
+            }
+        };
+        for g in &row.glyphs {
+            let marked = marks.iter().any(|m| m.contains(&index));
+            index += 1;
+            if !marked {
+                flush(&mut run);
+                continue;
+            }
+            // Spaces never start or end a marker; the union bridges inner ones.
+            if g.chr.is_whitespace() {
+                continue;
+            }
+            let top = origin.y + row.pos.y + g.pos.y - g.font_ascent;
+            let glyph = Rect::from_min_max(
+                pos2(origin.x + row.pos.x + g.pos.x, top),
+                pos2(origin.x + row.pos.x + g.max_x(), top + g.font_height),
+            );
+            run = Some(run.map_or(glyph, |r| r.union(glyph)));
+        }
+        flush(&mut run);
+    }
+}
+
 /// Soft 4-color arrows drifting upwards behind the card.
-fn draw_floating_arrows(painter: &egui::Painter, screen: Rect, t: f32) {
+pub(super) fn draw_floating_arrows(painter: &egui::Painter, screen: Rect, t: f32) {
     for i in 0..18u32 {
         let seed = (i as f32 * 12.9898).sin() * 43_758.547;
         let fx = seed.fract().abs();
