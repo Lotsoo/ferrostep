@@ -5,7 +5,11 @@
 //! The videos play one after another in a card with no controls at all: no
 //! skip, no pause, no seeking, and the window cannot be closed meanwhile.
 
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Instant;
+
+use crossbeam_channel::Receiver;
 
 use eframe::egui::{
     self, Align2, Color32, ColorImage, Rect, Sense, TextureHandle, TextureOptions, Ui, pos2, vec2,
@@ -37,6 +41,7 @@ const LEAD_IN: f32 = 0.6;
 const HOLD_END: f32 = 1.0;
 
 /// Indexed JPEG frames (see `convert_frames` in `build.rs`).
+#[derive(Clone, Copy)]
 struct FramePack {
     fps: f64,
     count: usize,
@@ -95,6 +100,62 @@ fn decode_jpeg(bytes: &[u8]) -> Option<ColorImage> {
         .then(|| ColorImage::from_rgba_unmultiplied(size, &pixels))
 }
 
+/// Decodes one video's frames on a background thread, a few frames ahead of
+/// playback, so a slow decode (720p JPEG) never stalls a UI frame.
+struct FrameDecoder {
+    /// Frame the UI wants now; the thread skips ahead if it fell behind.
+    wanted: Arc<AtomicUsize>,
+    rx: Receiver<(usize, ColorImage)>,
+    /// A decoded frame that is not due yet.
+    pending: Option<(usize, ColorImage)>,
+}
+
+impl FrameDecoder {
+    fn start(pack: FramePack) -> Self {
+        let wanted = Arc::new(AtomicUsize::new(0));
+        let (tx, rx) = crossbeam_channel::bounded(4);
+        let thread_wanted = Arc::clone(&wanted);
+        let spawned = std::thread::Builder::new()
+            .name("gift-video".into())
+            .spawn(move || {
+                let mut next = 0;
+                while next < pack.count {
+                    next = next.max(thread_wanted.load(Ordering::Relaxed));
+                    if let Some(image) = pack.frame(next).and_then(decode_jpeg) {
+                        // Fails once the video is over (receiver dropped).
+                        if tx.send((next, image)).is_err() {
+                            return;
+                        }
+                    }
+                    next += 1;
+                }
+            });
+        if let Err(e) = spawned {
+            log::warn!("gift video thread: {e}");
+        }
+        Self {
+            wanted,
+            rx,
+            pending: None,
+        }
+    }
+
+    /// Newest decoded frame at or before `want`, if a new one is ready.
+    fn take(&mut self, want: usize) -> Option<ColorImage> {
+        self.wanted.store(want, Ordering::Relaxed);
+        let mut newest = None;
+        while let Some((i, image)) = self.pending.take().or_else(|| self.rx.try_recv().ok()) {
+            if i <= want {
+                newest = Some(image);
+            } else {
+                self.pending = Some((i, image));
+                break;
+            }
+        }
+        newest
+    }
+}
+
 /// The greeting video sequence. See module docs.
 pub struct Greetings {
     videos: Vec<(&'static str, FramePack, &'static [u8])>,
@@ -103,7 +164,7 @@ pub struct Greetings {
     music: Option<Music>,
     clock: Option<AudioClock>,
     texture: Option<TextureHandle>,
-    shown_frame: Option<usize>,
+    decoder: FrameDecoder,
     ended_at: Option<Instant>,
     opened: Instant,
     nudged: Option<Instant>,
@@ -116,14 +177,15 @@ impl Greetings {
             .iter()
             .filter_map(|v| Some((v.name, FramePack::parse(v.frames)?, v.audio)))
             .collect();
-        (!videos.is_empty()).then_some(Self {
+        let first = videos.first()?.1;
+        Some(Self {
+            decoder: FrameDecoder::start(first),
             videos,
             index: 0,
             video_since: now,
             music: None,
             clock: None,
             texture: None,
-            shown_frame: None,
             ended_at: None,
             opened: now,
             nudged: None,
@@ -187,16 +249,14 @@ impl Greetings {
             self.video_since = now;
             self.music = None;
             self.clock = None;
-            self.shown_frame = None;
+            self.decoder = FrameDecoder::start(self.videos[self.index].1);
             self.ended_at = None;
         }
 
         // Upload the frame for the current time.
         let pack = &self.videos[self.index].1;
         let frame = ((t.max(0.0) * pack.fps) as usize).min(pack.count - 1);
-        if self.shown_frame != Some(frame)
-            && let Some(image) = pack.frame(frame).and_then(decode_jpeg)
-        {
+        if let Some(image) = self.decoder.take(frame) {
             match &mut self.texture {
                 Some(tex) => tex.set(image, TextureOptions::LINEAR),
                 None => {
@@ -204,7 +264,6 @@ impl Greetings {
                         Some(ctx.load_texture("gift-video", image, TextureOptions::LINEAR))
                 }
             }
-            self.shown_frame = Some(frame);
         }
         let progress = (t / duration).clamp(0.0, 1.0) as f32;
         let remaining = (duration - t.max(0.0)).max(0.0);

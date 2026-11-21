@@ -54,10 +54,10 @@ fn embed_letter() {
 }
 
 /// Bump when the conversion settings change so cached outputs are redone.
-const MEDIA_VERSION: u32 = 1;
-const VIDEO_FPS: u32 = 24;
-const VIDEO_HEIGHT: u32 = 432;
-const VIDEO_JPEG_QUALITY: u32 = 10;
+const MEDIA_VERSION: u32 = 2;
+const VIDEO_FPS: u32 = 30;
+const VIDEO_HEIGHT: u32 = 720;
+const VIDEO_JPEG_QUALITY: u32 = 5;
 
 /// Generates `$OUT_DIR/gift_media.rs` with `TRUMPET` and `VIDEOS` pointing at
 /// converted media (both empty in public builds or when ffmpeg is missing).
@@ -67,6 +67,17 @@ fn embed_gift_media() {
     };
     let out = PathBuf::from(out_dir);
     println!("cargo:rerun-if-changed=private/video");
+
+    // Drop media converted with older settings.
+    if let Ok(dir) = std::fs::read_dir(&out) {
+        let current = format!("_v{MEDIA_VERSION}.");
+        for entry in dir.flatten() {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if name.starts_with("gift_") && name != "gift_media.rs" && !name.contains(&current) {
+                let _ = std::fs::remove_file(entry.path());
+            }
+        }
+    }
 
     let mut trumpet = None;
     if let Some(src) = find_trumpet() {
