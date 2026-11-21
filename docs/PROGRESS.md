@@ -202,3 +202,5 @@ Di sesi Wayland, zona impor otomatis berganti teks "Klik untuk memilih file" (di
 - Gameplay: gelombang 4 warna + percikan tiap combo kelipatan 50, suara di kelipatan 100.
 - Transisi layar: 4 garis cahaya warna kolom melesat searah perpindahan (durasi tetap, tanpa menunggu ketukan).
 - Catatan teknis: XTest tidak sampai ke jendela XWayland di KDE, jadi uji visual jeda/kalibrasi/wizard memakai patch sementara yang tidak di-commit.
+- Pengaturan: slider buatan sendiri (kotak angka tebal, jalur gradien, kenop besar), ID pilihan bersegmen unik (peringatan merah egui di build debug hilang), path panjang dibungkus, teks sidebar dipendekkan dengan "…".
+- Hapus lagu: tombol "Hapus" / tombol Del di Pilih Lagu → dialog konfirmasi (Batal default) → folder lagu dihapus permanen. Pengaman: hanya folder lagu tunggal di dalam Songs/ yang berisi .sm/.ssc; folder grup kosong ikut dibersihkan. Penghapusan ditunda ±0,35 s setelah preview dihentikan (Windows mengunci file yang sedang diputar — belum diuji di Windows).
