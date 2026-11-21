@@ -376,13 +376,14 @@ fn draw_tap_strip(
         let (word, color) = judge(*d, 1.0).map_or(("Meleset", theme::DANGER), |j| {
             (j.label(), theme::judgment_color(j))
         });
-        widgets::text_tracked(
+        widgets::text_tracked_scaled(
             painter,
             center - vec2(0.0, 30.0),
             Align2::CENTER_CENTER,
             word,
-            font_bold(theme::TEXT_M * scale),
+            font_bold(theme::TEXT_M),
             color.gamma_multiply(alpha),
+            scale,
         );
     }
 }

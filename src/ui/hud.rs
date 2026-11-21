@@ -992,10 +992,19 @@ fn count_color(n: i32) -> Color32 {
     }
 }
 
-/// Text with a dark outline so it reads over anything.
-fn outlined(painter: &Painter, pos: Pos2, text: &str, size: f32, color: Color32, alpha: f32) {
+/// Text with a dark outline so it reads over anything, drawn at `scale` ×
+/// `size` (scaled as shapes, see `widgets::scale_shape`).
+fn outlined(
+    painter: &Painter,
+    pos: Pos2,
+    text: &str,
+    size: f32,
+    scale: f32,
+    color: Color32,
+    alpha: f32,
+) {
     let outline = Color32::from_black_alpha((170.0 * alpha) as u8);
-    let o = (size * 0.035).max(1.5);
+    let o = (size * scale * 0.035).max(1.5);
     for d in [
         vec2(o, 0.0),
         vec2(-o, 0.0),
@@ -1003,22 +1012,24 @@ fn outlined(painter: &Painter, pos: Pos2, text: &str, size: f32, color: Color32,
         vec2(0.0, -o),
         vec2(0.0, o * 2.0),
     ] {
-        widgets::text_tracked(
+        widgets::text_tracked_scaled(
             painter,
             pos + d,
             Align2::CENTER_CENTER,
             text,
             font_bold(size),
             outline,
+            scale,
         );
     }
-    widgets::text_tracked(
+    widgets::text_tracked_scaled(
         painter,
         pos,
         Align2::CENTER_CENTER,
         text,
         font_bold(size),
         color.gamma_multiply(alpha),
+        scale,
     );
 }
 
@@ -1109,7 +1120,8 @@ pub fn draw_countdown(
         painter,
         center,
         text,
-        size * slam,
+        size,
+        slam,
         color.lerp_to_gamma(Color32::WHITE, 0.25),
         fade,
     );

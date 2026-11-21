@@ -549,13 +549,14 @@ impl GameplayScreen {
                     color = color.lerp_to_gamma(Color32::WHITE, shimmer * 0.6);
                 }
                 notefield::draw_glow(painter, pos, 46.0 * pop, color, alpha * 0.9);
-                widgets::text_tracked(
+                widgets::text_tracked_scaled(
                     painter,
                     pos,
                     Align2::CENTER_CENTER,
                     judgment.label(),
-                    font_bold(36.0 * pop),
+                    font_bold(36.0),
                     color.gamma_multiply(alpha),
+                    pop,
                 );
                 // Early/late hint only when it matters (Great and worse).
                 if let Some((_, ms)) = score.offsets.last().filter(|_| {
@@ -606,13 +607,14 @@ impl GameplayScreen {
                 );
                 notefield::draw_glow(painter, center, 60.0, theme::ACCENT_A, fade * 1.5);
             }
-            widgets::tabular_text(
+            widgets::tabular_text_scaled(
                 painter,
                 center,
                 Align2::CENTER_CENTER,
                 &combo.to_string(),
-                font_bold(50.0 * bump),
+                font_bold(50.0),
                 color,
+                bump,
             );
             let label_pos = center + vec2(0.0, 36.0);
             match self.hud.milestone(now) {

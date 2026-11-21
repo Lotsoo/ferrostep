@@ -324,7 +324,9 @@ fn draw_gradient_logo(
     reduce: bool,
 ) {
     let scale = 1.0 + if reduce { 0.0 } else { 0.05 * beat.downbeat };
-    let font_id = font_bold(size * scale);
+    // Fixed font size, scaled as shapes (an animated size would keep
+    // filling the font atlas; see `widgets::scale_shape`).
+    let font_id = font_bold(size);
     let widths: Vec<f32> = text
         .chars()
         .map(|c| {
@@ -332,6 +334,7 @@ fn draw_gradient_logo(
                 .layout_no_wrap(c.to_string(), font_id.clone(), Color32::WHITE)
                 .size()
                 .x
+                * scale
         })
         .collect();
     let total: f32 = widths.iter().sum();
@@ -356,7 +359,13 @@ fn draw_gradient_logo(
         if hop > 1.0 {
             crate::ui::notefield::radial_light(painter, pos, w, color, 0.25 * hop / 10.0);
         }
-        painter.text(pos, Align2::CENTER_CENTER, c, font_id.clone(), color);
+        let galley = painter.layout_no_wrap(c.to_string(), font_id.clone(), color);
+        let at = Align2::CENTER_CENTER.anchor_size(pos, galley.size());
+        painter.add(widgets::scale_shape(
+            egui::Shape::galley(at.min, galley, color),
+            pos,
+            scale,
+        ));
         x += w;
     }
 }

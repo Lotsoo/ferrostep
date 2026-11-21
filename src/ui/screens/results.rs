@@ -482,10 +482,11 @@ fn draw_stamp(painter: &egui::Painter, center: Pos2, text: &str, age: f32, color
     let alpha = (age / 0.1).min(1.0);
     let galley = painter.layout_no_wrap(
         text.to_string(),
-        font_bold(theme::TEXT_M * scale),
+        font_bold(theme::TEXT_M),
         theme::INK.gamma_multiply(alpha),
     );
-    let size = galley.size() + vec2(24.0, 12.0) * scale;
+    let text_size = galley.size();
+    let size = (text_size + vec2(24.0, 12.0)) * scale;
     let rect = Rect::from_center_size(center, size);
     crate::ui::notefield::radial_light(painter, center, size.x, color, 0.35 * alpha);
     painter.rect_filled(rect, 8.0 * scale, color.gamma_multiply(alpha));
@@ -495,5 +496,9 @@ fn draw_stamp(painter: &egui::Painter, center: Pos2, text: &str, age: f32, color
         Stroke::new(2.0, Color32::WHITE.gamma_multiply(0.8 * alpha)),
         egui::StrokeKind::Outside,
     );
-    painter.galley(rect.center() - galley.size() / 2.0, galley, theme::INK);
+    painter.add(crate::ui::widgets::scale_shape(
+        egui::Shape::galley(center - text_size / 2.0, galley, theme::INK),
+        center,
+        scale,
+    ));
 }

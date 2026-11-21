@@ -100,13 +100,22 @@ impl Palette {
 }
 
 /// Proportional font of a given size.
+///
+/// Sizes are rounded to half points: every distinct size fills egui's font
+/// atlas with new glyphs (and a full atlas is rebuilt, which stalls a frame),
+/// so an accidentally animated size must not create endless variants.
+/// Animate with [`super::widgets::scale_shape`] instead.
 pub fn font(size: f32) -> FontId {
-    FontId::new(size, FontFamily::Proportional)
+    FontId::new(quantize(size), FontFamily::Proportional)
+}
+
+fn quantize(size: f32) -> f32 {
+    (size * 2.0).round() / 2.0
 }
 
 /// Bold font (registered in `ui::fonts`).
 pub fn font_bold(size: f32) -> FontId {
-    FontId::new(size, FontFamily::Name(super::fonts::BOLD.into()))
+    FontId::new(quantize(size), FontFamily::Name(super::fonts::BOLD.into()))
 }
 
 /// Applies the palette to egui's built-in widgets.

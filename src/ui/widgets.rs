@@ -312,6 +312,36 @@ pub fn text_tracked(
     font_id: egui::FontId,
     color: Color32,
 ) -> Rect {
+    text_tracked_scaled(painter, pos, anchor, text, font_id, color, 1.0)
+}
+
+/// Scales shapes by `scale` around `center`.
+///
+/// Animated text must be scaled like this instead of changing the font size
+/// every frame: each new font size adds glyphs to egui's font atlas, which
+/// then fills up and is rebuilt, and that rebuild stalls a frame for
+/// 50–300 ms (visible as stutter in gameplay).
+pub fn scale_shape(shape: impl Into<egui::Shape>, center: Pos2, scale: f32) -> egui::Shape {
+    let mut shape = shape.into();
+    if (scale - 1.0).abs() > 1e-4 {
+        shape.transform(egui::emath::TSTransform::new(
+            center.to_vec2() * (1.0 - scale),
+            scale,
+        ));
+    }
+    shape
+}
+
+/// [`text_tracked`] drawn at `scale` × its size (for pop animations).
+pub fn text_tracked_scaled(
+    painter: &Painter,
+    pos: Pos2,
+    anchor: Align2,
+    text: &str,
+    font_id: egui::FontId,
+    color: Color32,
+    scale: f32,
+) -> Rect {
     let size = font_id.size;
     let is_caps_label = size <= 13.0 && text.chars().all(|c| !c.is_lowercase());
     let tracking_em = if is_caps_label {
@@ -338,8 +368,19 @@ pub fn text_tracked(
     );
     let galley = painter.layout_job(job);
     let rect = anchor.anchor_size(pos, galley.size());
-    painter.galley(rect.min, galley, color);
-    rect
+    painter.add(scale_shape(
+        egui::Shape::galley(rect.min, galley, color),
+        pos,
+        scale,
+    ));
+    scale_rect(rect, pos, scale)
+}
+
+fn scale_rect(rect: Rect, center: Pos2, scale: f32) -> Rect {
+    Rect::from_min_max(
+        center + (rect.min - center) * scale,
+        center + (rect.max - center) * scale,
+    )
 }
 
 /// A frame that looks like a card, for egui layouts.
@@ -421,6 +462,19 @@ pub fn tabular_text(
     font_id: egui::FontId,
     color: Color32,
 ) -> Rect {
+    tabular_text_scaled(painter, pos, anchor, text, font_id, color, 1.0)
+}
+
+/// [`tabular_text`] drawn at `scale` × its size (for pop animations).
+pub fn tabular_text_scaled(
+    painter: &Painter,
+    pos: Pos2,
+    anchor: Align2,
+    text: &str,
+    font_id: egui::FontId,
+    color: Color32,
+    scale: f32,
+) -> Rect {
     let digit_w = painter
         .layout_no_wrap("0".into(), font_id.clone(), color)
         .size()
@@ -443,16 +497,17 @@ pub fn tabular_text(
     let rect = anchor.anchor_size(pos, vec2(total, height));
     let mut x = rect.left();
     for (c, w) in text.chars().zip(widths) {
-        painter.text(
-            pos2(x + w / 2.0, rect.center().y),
-            Align2::CENTER_CENTER,
-            c,
-            font_id.clone(),
-            color,
-        );
+        let galley = painter.layout_no_wrap(c.to_string(), font_id.clone(), color);
+        let at =
+            Align2::CENTER_CENTER.anchor_size(pos2(x + w / 2.0, rect.center().y), galley.size());
+        painter.add(scale_shape(
+            egui::Shape::galley(at.min, galley, color),
+            pos,
+            scale,
+        ));
         x += w;
     }
-    rect
+    scale_rect(rect, pos, scale)
 }
 
 /// Deterministic pleasant color from a string (used for song backgrounds).
