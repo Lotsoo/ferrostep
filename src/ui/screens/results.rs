@@ -2,20 +2,29 @@
 
 use std::time::Instant;
 
-use eframe::egui::{self, Align2, Pos2, Rect, Stroke, Ui, pos2, vec2};
+use eframe::egui::{self, Align2, Color32, Pos2, Rect, Stroke, Ui, pos2, vec2};
 
 use super::{Nav, ResultData, difficulty_color, difficulty_label};
 use crate::app::Shared;
+use crate::audio::Sfx;
 use crate::gameplay::judge::{Judgment, WINDOWS};
 use crate::input::{FrameInput, MenuAction};
 use crate::ui::theme::{self, font, font_bold, judgment_color};
-use crate::ui::{anim, widgets};
+use crate::ui::{anim, beatfx, widgets};
+
+/// When the grade slams in (after the percentage finished counting).
+const GRADE_AT: f32 = 1.3;
+/// When the "new record" / "full combo" stamp lands.
+const STAMP_AT: f32 = 1.9;
 
 pub struct ResultsScreen {
     data: ResultData,
     opened: Instant,
     offset_applied: bool,
     selected: usize,
+    /// Reveal sounds already played (grade, stamp).
+    grade_sound: bool,
+    stamp_sound: bool,
 }
 
 impl ResultsScreen {
@@ -25,6 +34,8 @@ impl ResultsScreen {
             opened: Instant::now(),
             offset_applied: false,
             selected: 1,
+            grade_sound: false,
+            stamp_sound: false,
         }
     }
 
@@ -55,23 +66,100 @@ impl ResultsScreen {
         let rect = ui.max_rect().shrink(32.0);
         let painter = ui.painter().clone();
         let score = &self.data.score;
+        let grade = score.grade(self.data.no_fail);
+        let style = theme::grade_style(grade);
+        // Reveal timeline (skipped with reduce motion).
+        let t_reveal = if reduce { 10.0 } else { t };
+        let grade_t = t_reveal - GRADE_AT;
+        let full_combo = score.counts[Judgment::Good.index()] == 0
+            && score.counts[Judgment::Boo.index()] == 0
+            && score.counts[Judgment::Miss.index()] == 0
+            && score.counts.iter().sum::<u32>() > 0;
+        let record = self
+            .data
+            .previous_best
+            .is_none_or(|prev| score.percent() > prev)
+            && score.percent() > 0.0;
+        let stamp = if full_combo {
+            Some("FULL COMBO")
+        } else if record {
+            Some("REKOR BARU!")
+        } else {
+            None
+        };
+        if grade_t >= 0.0 && !self.grade_sound {
+            self.grade_sound = true;
+            if !reduce {
+                shared.sfx(if matches!(grade, "SS" | "S" | "A") {
+                    Sfx::Start
+                } else {
+                    Sfx::Count
+                });
+            }
+        }
+        if stamp.is_some() && t_reveal >= STAMP_AT && !self.stamp_sound {
+            self.stamp_sound = true;
+            if !reduce {
+                shared.sfx(Sfx::Success);
+            }
+        }
+        if t < 3.0 {
+            ui.ctx().request_repaint();
+        }
+
+        // Arcade stage behind everything, tinted by the grade.
+        let mut beat = beatfx::Beat::idle(t);
+        if reduce {
+            beat = beat.calm();
+        }
+        if palette.dark {
+            beatfx::draw_highway(&painter, ui.max_rect(), style.glow, &beat);
+        }
+        // Flash in the grade color when it lands.
+        if !reduce && (0.0..0.35).contains(&grade_t) {
+            painter.rect_filled(
+                ui.max_rect(),
+                0,
+                style.glow.gamma_multiply(0.25 * (1.0 - grade_t / 0.35)),
+            );
+        }
 
         // ── Left: grade + percentage ─────────────────────────────
         let left = Rect::from_min_size(rect.min, vec2(rect.width() * 0.38, rect.height() - 220.0));
         widgets::card(&painter, left, &palette);
-        let grade = score.grade(self.data.no_fail);
-        let appear = anim::progress(self.opened, now, 0.5, reduce);
-        let scale = anim::ease_out_back(appear);
         let grade_pos = left.center_top() + vec2(0.0, left.height() * 0.32);
-        let size = 150.0 * scale.max(0.01);
-        crate::ui::hud::draw_grade_badge(
-            &painter,
-            Rect::from_center_size(grade_pos, vec2(size, size)),
-            grade,
-            (1.0 - appear) * 0.5,
-            ui.input(|i| i.time) as f32,
-            reduce,
-        );
+        if grade_t < 0.0 {
+            draw_drum_roll(&painter, grade_pos, t, style.glow);
+        } else {
+            // Slam: starts huge, lands with a small bounce.
+            let land = anim::ease_out_back((grade_t / 0.28).min(1.0));
+            let slam = 2.4 - 1.4 * land;
+            let size = 150.0 * slam;
+            if !reduce {
+                draw_impact(&painter, grade_pos, grade_t, style.glow);
+            }
+            crate::ui::hud::draw_grade_badge(
+                &painter,
+                Rect::from_center_size(grade_pos, vec2(size, size)),
+                grade,
+                (1.0 - (grade_t / 0.5).min(1.0)) * 0.5,
+                ui.input(|i| i.time) as f32,
+                reduce,
+            );
+            if let Some(text) = stamp {
+                draw_stamp(
+                    &painter,
+                    grade_pos + vec2(84.0, -78.0),
+                    text,
+                    t_reveal - STAMP_AT,
+                    if full_combo {
+                        Color32::from_rgb(0xFF, 0xD8, 0x4D)
+                    } else {
+                        theme::SUCCESS
+                    },
+                );
+            }
+        }
         if !reduce {
             ui.ctx().request_repaint();
         }
@@ -162,7 +250,7 @@ impl ResultsScreen {
                 &painter,
                 pos2(right.right() - 28.0, y),
                 Align2::RIGHT_CENTER,
-                &count.to_string(),
+                &((count as f32 * grow).round() as u32).to_string(),
                 font_bold(theme::TEXT_S),
                 palette.text,
             );
@@ -334,4 +422,78 @@ impl ResultsScreen {
             );
         }
     }
+}
+
+/// Spinning "drum roll" while the score counts up, before the grade lands.
+fn draw_drum_roll(painter: &egui::Painter, center: Pos2, t: f32, color: Color32) {
+    for k in 0..12 {
+        let a = k as f32 / 12.0 * std::f32::consts::TAU + t * 9.0;
+        let lit = ((t * 18.0) as i32 - k).rem_euclid(12) < 3;
+        painter.circle_filled(
+            center + vec2(a.cos(), a.sin()) * 64.0,
+            if lit { 6.0 } else { 4.0 },
+            if lit {
+                color
+            } else {
+                Color32::from_white_alpha(40)
+            },
+        );
+    }
+    crate::ui::notefield::radial_light(painter, center, 90.0, color, 0.2 + 0.1 * (t * 12.0).sin());
+}
+
+/// Shockwave rings and sparks when the grade lands.
+fn draw_impact(painter: &egui::Painter, center: Pos2, age: f32, color: Color32) {
+    if age > 0.9 {
+        return;
+    }
+    for (k, delay) in [(0.0f32, 0.0f32), (1.0, 0.1)] {
+        let e = anim::ease_out_cubic(((age - delay) / 0.7).clamp(0.0, 1.0));
+        if e <= 0.0 || e >= 1.0 {
+            continue;
+        }
+        painter.circle_stroke(
+            center,
+            80.0 + e * 320.0,
+            Stroke::new((9.0 - k * 4.0) * (1.0 - e), color.gamma_multiply(1.0 - e)),
+        );
+    }
+    let e = anim::ease_out_cubic((age / 0.8).min(1.0));
+    for i in 0..20 {
+        let a = i as f32 / 20.0 * std::f32::consts::TAU;
+        let d = 90.0 + e * (150.0 + (i % 4) as f32 * 45.0);
+        painter.circle_filled(
+            center + vec2(a.cos(), a.sin()) * d,
+            4.0 * (1.0 - e) + 0.5,
+            color
+                .lerp_to_gamma(Color32::WHITE, 0.5)
+                .gamma_multiply(1.0 - e),
+        );
+    }
+}
+
+/// Tilted rubber-stamp label ("FULL COMBO", "REKOR BARU!") that thumps down.
+fn draw_stamp(painter: &egui::Painter, center: Pos2, text: &str, age: f32, color: Color32) {
+    if age < 0.0 {
+        return;
+    }
+    let land = anim::ease_out_back((age / 0.22).min(1.0));
+    let scale = 1.8 - 0.8 * land;
+    let alpha = (age / 0.1).min(1.0);
+    let galley = painter.layout_no_wrap(
+        text.to_string(),
+        font_bold(theme::TEXT_M * scale),
+        theme::INK.gamma_multiply(alpha),
+    );
+    let size = galley.size() + vec2(24.0, 12.0) * scale;
+    let rect = Rect::from_center_size(center, size);
+    crate::ui::notefield::radial_light(painter, center, size.x, color, 0.35 * alpha);
+    painter.rect_filled(rect, 8.0 * scale, color.gamma_multiply(alpha));
+    painter.rect_stroke(
+        rect.expand(3.0),
+        11.0 * scale,
+        Stroke::new(2.0, Color32::WHITE.gamma_multiply(0.8 * alpha)),
+        egui::StrokeKind::Outside,
+    );
+    painter.galley(rect.center() - galley.size() / 2.0, galley, theme::INK);
 }
