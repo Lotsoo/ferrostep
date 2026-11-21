@@ -247,7 +247,7 @@ pub fn draw_milestone_surge(painter: &Painter, s: &Stage, age: f32) {
         };
         for i in 0..10 {
             let a = (i as f32 / 9.0 - 0.5) * 1.4; // spread angle
-            let dir = vec2(side * a.cos(), a.sin() * s.layout.dir.signum() * -1.0);
+            let dir = vec2(side * a.cos(), -(a.sin() * s.layout.dir.signum()));
             let d = 20.0 + e * (90.0 + (i % 3) as f32 * 40.0);
             let color = column_color((i % 4) as u8);
             painter.circle_filled(
