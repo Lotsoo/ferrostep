@@ -96,8 +96,7 @@ pub struct Audio {
     sfx: Vec<StaticSoundData>,
     /// Separate mixer track so menu sounds have their own volume.
     sfx_track: Option<TrackHandle>,
-    /// Current slider values, so menu sounds can ignore the music volume.
-    master_volume: f32,
+    /// Current menu sound slider value.
     sfx_volume: f32,
 }
 
@@ -120,37 +119,27 @@ impl Audio {
                 .map(|s| stereo_sound(sfx::render(*s, SYNTH_SAMPLE_RATE)))
                 .collect(),
             sfx_track,
-            master_volume: 1.0,
             sfx_volume: 1.0,
         })
     }
 
     /// Sets the master volume (0..=1).
     pub fn set_volume(&mut self, volume: f32) {
-        self.master_volume = volume;
         self.manager
             .main_track()
             .set_volume(volume_to_db(volume), tween_ms(50));
-        self.apply_sfx_volume();
     }
 
-    /// Sets the menu sound volume (0..=1). Independent of the music volume:
-    /// at 100% menu sounds play at full level even if the music is turned down
-    /// (only a fully muted master silences them).
+    /// Sets the menu sound volume (0..=1), relative to the master volume
+    /// (one master slider controls everything; sounds are pre-balanced
+    /// against typical music loudness).
     pub fn set_sfx_volume(&mut self, volume: f32) {
         self.sfx_volume = volume;
         self.apply_sfx_volume();
     }
 
     fn apply_sfx_volume(&mut self) {
-        let master = volume_to_db(self.master_volume);
-        let wanted = sfx_volume_to_db(self.sfx_volume);
-        // The sfx track sits under the main track, so undo the master gain.
-        let db = if master == Decibels::SILENCE || wanted == Decibels::SILENCE {
-            Decibels::SILENCE
-        } else {
-            Decibels(wanted.0 - master.0)
-        };
+        let db = sfx_volume_to_db(self.sfx_volume);
         if let Some(track) = &mut self.sfx_track {
             track.set_volume(db, tween_ms(50));
         }

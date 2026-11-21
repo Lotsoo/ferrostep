@@ -53,12 +53,16 @@ impl Sfx {
         self as usize
     }
 
-    /// Loudest sample after mixing; quiet sounds stay quiet, big ones are big.
-    fn peak(self) -> f32 {
+    /// Target loudness (RMS of the attack, dBFS), balanced against music.
+    /// Typical songs sit around −14 dBFS: frequent sounds (moves) stay under
+    /// the music, actions sit just above it, the countdown stands out.
+    pub fn loudness_db(self) -> f32 {
         match self {
-            Sfx::Hover => 0.4,
-            Sfx::MoveUp | Sfx::MoveDown | Sfx::ChangeLeft | Sfx::ChangeRight => 0.85,
-            _ => 0.98,
+            Sfx::Hover => -32.0,
+            Sfx::MoveUp | Sfx::MoveDown | Sfx::ChangeLeft | Sfx::ChangeRight => -20.0,
+            Sfx::Confirm | Sfx::Back | Sfx::Success => -14.0,
+            Sfx::Count => -12.0,
+            Sfx::Start | Sfx::Go => -11.0,
         }
     }
 
@@ -469,13 +473,15 @@ pub fn render(sfx: Sfx, sample_rate: u32) -> Vec<[f32; 2]> {
             *s = (*s / p * drive).tanh();
         }
     }
-    // Normalize to the sound's target loudness, and fade the very end.
+    // Normalize the attack's loudness (what the ear judges), never clipping.
+    let rms = attack_rms(&left, &right, sr).max(1e-6);
     let peak = left
         .iter()
         .chain(&right)
         .fold(0.0f32, |m, s| m.max(s.abs()))
         .max(1e-6);
-    let gain = sfx.peak() / peak;
+    let target = 10f32.powf(sfx.loudness_db() / 20.0);
+    let gain = (target / rms).min(MAX_PEAK / peak);
     let fade = (0.03 * sr) as usize;
     (0..len)
         .map(|i| {
@@ -483,6 +489,20 @@ pub fn render(sfx: Sfx, sample_rate: u32) -> Vec<[f32; 2]> {
             [left[i] * gain * f, right[i] * gain * f]
         })
         .collect()
+}
+
+/// Highest allowed sample.
+const MAX_PEAK: f32 = 0.98;
+
+/// RMS over the first 70 ms (the part that sets how loud a short sound feels).
+fn attack_rms(left: &[f32], right: &[f32], sr: f32) -> f32 {
+    let n = ((0.07 * sr) as usize).min(left.len()).max(1);
+    let sum: f32 = left[..n]
+        .iter()
+        .zip(&right[..n])
+        .map(|(l, r)| l * l + r * r)
+        .sum();
+    (sum / (2 * n) as f32).sqrt()
 }
 
 #[cfg(test)]
@@ -495,13 +515,19 @@ mod tests {
     }
 
     #[test]
-    fn sounds_are_loud_enough_short_and_clean() {
+    fn sounds_are_balanced_short_and_clean() {
         for sfx in Sfx::ALL {
             let s = render(sfx, 44_100);
             let seconds = s.len() as f32 / 44_100.0;
             assert!(seconds < 1.8, "{sfx:?} too long: {seconds}");
-            let p = peak(&s);
-            assert!((p - sfx.peak()).abs() < 0.01, "{sfx:?} peak {p}");
+            assert!(peak(&s) <= MAX_PEAK + 1e-4, "{sfx:?} clips");
+            let (l, r): (Vec<f32>, Vec<f32>) = s.iter().map(|[l, r]| (*l, *r)).unzip();
+            let db = 20.0 * attack_rms(&l, &r, 44_100.0).log10();
+            assert!(
+                (db - sfx.loudness_db()).abs() < 1.0,
+                "{sfx:?} is {db:.1} dB, wanted {}",
+                sfx.loudness_db()
+            );
             let [l0, r0] = s[0];
             let [l1, r1] = s[s.len() - 1];
             assert!(
@@ -513,20 +539,8 @@ mod tests {
                 "{sfx:?} ends with a click"
             );
         }
-        assert!(sfx_peak(Sfx::Hover) < sfx_peak(Sfx::MoveUp) * 0.5);
-        // Loud: menu moves carry real energy, not just a short spike.
-        let rms = |sfx| {
-            let s = render(sfx, 44_100);
-            let n = (0.05 * 44_100.0) as usize;
-            (s[..n].iter().map(|[l, r]| l * l + r * r).sum::<f32>() / (2 * n) as f32).sqrt()
-        };
-        for sfx in [Sfx::MoveUp, Sfx::Confirm, Sfx::Count, Sfx::Go] {
-            assert!(rms(sfx) > 0.25, "{sfx:?} rms {}", rms(sfx));
-        }
-    }
-
-    fn sfx_peak(sfx: Sfx) -> f32 {
-        peak(&render(sfx, 44_100))
+        // Menu moves (heard all the time) stay under actions like Enter.
+        assert!(Sfx::MoveUp.loudness_db() + 4.0 < Sfx::Confirm.loudness_db());
     }
 
     #[test]
