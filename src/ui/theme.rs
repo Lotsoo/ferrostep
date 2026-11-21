@@ -162,3 +162,81 @@ pub fn apply(ctx: &egui::Context, palette: &Palette, ui_scale: f32) {
             .insert(egui::TextStyle::Small, font(TEXT_XS));
     });
 }
+
+/// Relative luminance (WCAG) of an sRGB color.
+fn luminance(c: Color32) -> f32 {
+    let lin = |v: u8| {
+        let v = f32::from(v) / 255.0;
+        if v <= 0.040_45 {
+            v / 12.92
+        } else {
+            ((v + 0.055) / 1.055).powf(2.4)
+        }
+    };
+    0.2126 * lin(c.r()) + 0.7152 * lin(c.g()) + 0.0722 * lin(c.b())
+}
+
+/// WCAG contrast ratio between two colors (1..21).
+pub fn contrast(a: Color32, b: Color32) -> f32 {
+    let (la, lb) = (luminance(a), luminance(b));
+    (la.max(lb) + 0.05) / (la.min(lb) + 0.05)
+}
+
+/// Near-black text used on bright badges.
+pub const INK: Color32 = rgb(0x14_1020);
+
+/// Dark ink or white, whichever reads better on `background`.
+pub fn readable_text(background: Color32) -> Color32 {
+    if contrast(INK, background) >= contrast(Color32::WHITE, background) {
+        INK
+    } else {
+        Color32::WHITE
+    }
+}
+
+/// Colors of a grade badge: each grade has its own bright gradient so it
+/// stands out from the dark, blue/violet game stage.
+#[derive(Debug, Clone, Copy)]
+pub struct GradeStyle {
+    pub top: Color32,
+    pub bottom: Color32,
+    pub text: Color32,
+    pub glow: Color32,
+}
+
+/// Badge colors for a grade label ("SS", "S", "A", "B", "C", "D", "F").
+pub fn grade_style(grade: &str) -> GradeStyle {
+    let (top, bottom, glow) = match grade {
+        "SS" => (rgb(0xFFF6C2), rgb(0xFFC23C), rgb(0xFFD84D)),
+        "S" => (rgb(0xFFCF8A), rgb(0xFF7A45), rgb(0xFF8A4C)),
+        "A" => (rgb(0x9CFFCB), rgb(0x22C27A), rgb(0x3DFFA0)),
+        "B" => (rgb(0xA6E1FF), rgb(0x3A92FF), rgb(0x3EC8FF)),
+        "C" => (rgb(0xDCCBFF), rgb(0x9A72FF), rgb(0xB07CFF)),
+        "D" => (rgb(0xE6EBF2), rgb(0x9AA8BC), rgb(0xC0CAD8)),
+        _ => (rgb(0xFFB0B0), rgb(0xF0565B), rgb(0xFF5C5C)),
+    };
+    GradeStyle {
+        top,
+        bottom,
+        text: readable_text(bottom.lerp_to_gamma(top, 0.5)),
+        glow,
+    }
+}
+
+#[cfg(test)]
+mod grade_tests {
+    use super::*;
+
+    #[test]
+    fn every_grade_badge_is_readable() {
+        for g in ["SS", "S", "A", "B", "C", "D", "F"] {
+            let s = grade_style(g);
+            // The letter must read well across the whole gradient (WCAG AA: 4.5).
+            for bg in [s.top, s.bottom] {
+                let c = contrast(s.text, bg);
+                assert!(c >= 4.5, "{g}: contrast {c:.2}");
+            }
+        }
+        assert!(contrast(Color32::WHITE, Color32::BLACK) > 20.0);
+    }
+}

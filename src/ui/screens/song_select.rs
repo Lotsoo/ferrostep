@@ -350,12 +350,17 @@ impl SongSelectScreen {
             return Some(n);
         }
 
-        ui.painter().text(
-            pos2(rect.left(), rect.bottom()),
+        widgets::key_hints(
+            ui.painter(),
+            pos2(rect.left(), rect.bottom() + 8.0),
             Align2::LEFT_BOTTOM,
-            "↑↓ pilih lagu · ←→ tingkat kesulitan · Enter/Start main · Esc kembali",
-            font(theme::TEXT_XS),
-            palette.text_dim,
+            &[
+                ("↑ ↓", "Pilih lagu"),
+                ("← →", "Kesulitan"),
+                ("Enter", "Main"),
+                ("Esc", "Kembali"),
+            ],
+            &palette,
         );
         None
     }

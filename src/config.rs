@@ -45,6 +45,8 @@ pub struct Settings {
     pub reverse: bool,
     /// Master volume 0.0..=1.0.
     pub volume: f32,
+    /// Menu sound effects volume 0.0..=1.0 (0 = off).
+    pub sfx_volume: f32,
     /// Multiplier for the judgment windows (1.0 = normal, < 1 is stricter).
     pub judge_scale: f64,
     pub no_fail: bool,
@@ -78,6 +80,7 @@ impl Default for Settings {
             xmod: 2.0,
             reverse: false,
             volume: 0.8,
+            sfx_volume: 1.0,
             judge_scale: 1.0,
             no_fail: true,
             keybinds: [

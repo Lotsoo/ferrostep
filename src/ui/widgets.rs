@@ -538,3 +538,89 @@ pub fn segmented(ui: &mut Ui, palette: &Palette, options: &[&str], selected: &mu
     }
     changed
 }
+
+/// Control hints at the bottom of a screen: each key drawn as a keycap with a
+/// bold label, on a glass strip. `items` are `(key, what it does)`.
+pub fn key_hints(
+    painter: &Painter,
+    anchor: Pos2,
+    align: Align2,
+    items: &[(&str, &str)],
+    palette: &Palette,
+) -> Rect {
+    const H: f32 = 40.0;
+    const PAD: f32 = 14.0;
+    const GAP_KEY: f32 = 8.0;
+    const GAP_ITEM: f32 = 20.0;
+    let key_font = font_bold(theme::TEXT_S);
+    let label_font = font_bold(theme::TEXT_S + 1.0);
+    let measure = |text: &str, f: &egui::FontId| {
+        painter
+            .layout_no_wrap(text.to_string(), f.clone(), Color32::WHITE)
+            .size()
+            .x
+    };
+    let widths: Vec<(f32, f32)> = items
+        .iter()
+        .map(|(k, l)| {
+            (
+                (measure(k, &key_font) + 16.0).max(30.0),
+                measure(l, &label_font),
+            )
+        })
+        .collect();
+    let total = PAD * 2.0
+        + widths.iter().map(|(k, l)| k + GAP_KEY + l).sum::<f32>()
+        + GAP_ITEM * (items.len().saturating_sub(1)) as f32;
+    let strip = align.anchor_size(anchor, vec2(total, H));
+
+    painter.rect_filled(
+        strip,
+        theme::RADIUS_PILL,
+        palette.surface.gamma_multiply(0.92),
+    );
+    painter.rect_stroke(
+        strip,
+        theme::RADIUS_PILL,
+        palette.card_stroke(),
+        StrokeKind::Inside,
+    );
+    let mut x = strip.left() + PAD;
+    let cy = strip.center().y;
+    for ((key, label), (kw, lw)) in items.iter().zip(widths) {
+        let cap = Rect::from_min_size(pos2(x, cy - 13.0), vec2(kw, 24.0));
+        // Keycap: darker base below gives a pressable, 3D look.
+        painter.rect_filled(
+            cap.translate(vec2(0.0, 2.0)),
+            7,
+            Color32::from_black_alpha(110),
+        );
+        painter.rect_filled(
+            cap,
+            7,
+            palette.surface_hover.lerp_to_gamma(Color32::WHITE, 0.10),
+        );
+        painter.rect_stroke(
+            cap,
+            7,
+            Stroke::new(1.0, Color32::from_white_alpha(60)),
+            StrokeKind::Inside,
+        );
+        painter.text(
+            cap.center(),
+            Align2::CENTER_CENTER,
+            *key,
+            key_font.clone(),
+            palette.text,
+        );
+        painter.text(
+            pos2(cap.right() + GAP_KEY, cy),
+            Align2::LEFT_CENTER,
+            *label,
+            label_font.clone(),
+            palette.text,
+        );
+        x += kw + GAP_KEY + lw + GAP_ITEM;
+    }
+    strip
+}

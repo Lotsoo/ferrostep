@@ -55,9 +55,16 @@ pub struct GameplayScreen {
     difficulty_color: Color32,
     hud: HudAnim,
     last_combo: u32,
+    /// Last countdown number that played its sound (4 = none yet, 0 = "go").
+    count_played: i32,
 }
 
 impl GameplayScreen {
+    /// True while the pause menu is open.
+    pub fn is_paused(&self) -> bool {
+        self.pause.is_some()
+    }
+
     /// Prepares a play. Fails with a friendly message if the chart or audio is unusable.
     pub fn new(request: PlayRequest, settings: &Settings) -> Result<Self> {
         let sim = &request.simfile;
@@ -72,8 +79,7 @@ impl GameplayScreen {
         if notes.is_empty() {
             bail!("chart ini tidak berisi panah");
         }
-        let first = notes.first().map_or(0.0, |n| n.time);
-        let lead_in = (2.5 - first).clamp(1.0, 3.0);
+        let lead_in = hud::LEAD_IN;
         let columns = chart.columns.min(4);
         let session = GameSession::new(notes, columns, settings.judge_scale);
         let song_length = session.end_time;
@@ -91,6 +97,7 @@ impl GameplayScreen {
             difficulty_color: difficulty_color(chart.difficulty),
             hud: HudAnim::default(),
             last_combo: 0,
+            count_played: 4,
             request,
             music_path,
             session,
@@ -132,6 +139,11 @@ impl GameplayScreen {
                 Ok(clock.update(raw, now) - offset)
             }
         }
+    }
+
+    /// Pauses right away (e.g. when the quit dialog opens).
+    pub fn pause_now(&mut self) {
+        self.set_paused(true, Instant::now());
     }
 
     fn set_paused(&mut self, paused: bool, now: Instant) {
@@ -284,6 +296,7 @@ impl GameplayScreen {
                 self.session.autoplay(self.song_time);
             }
             self.session.update(self.song_time);
+            self.countdown_sounds(shared);
             self.handle_events(now);
 
             let music_done = self.music.as_ref().is_some_and(Music::is_stopped);
@@ -352,7 +365,9 @@ impl GameplayScreen {
             .map(|c| self.session.is_pressed(c))
             .collect();
         if self.pause.is_none() {
-            self.hud.update(&self.session.score, &pressed, dt, reduce);
+            let failed = self.session.score.failed && !shared.settings.no_fail;
+            self.hud
+                .update(&self.session.score, failed, &pressed, dt, reduce);
         }
 
         let stage = Stage {
@@ -395,21 +410,38 @@ impl GameplayScreen {
             self.set_paused(true, now);
         }
 
-        if self.song_time < 0.0 && self.pause.is_none() {
-            hud::draw_countdown(&painter, rect.center(), -self.song_time, reduce);
-        } else if self.song_time < 0.8 && self.pause.is_none() {
-            let a = 1.0 - (self.song_time as f32 / 0.8);
-            widgets::text_tracked(
+        if self.song_time < 1.0 && self.pause.is_none() {
+            hud::draw_countdown(
                 &painter,
-                rect.center(),
-                Align2::CENTER_CENTER,
-                "Mulai!",
-                font_bold(48.0 + (1.0 - a) * 12.0),
-                Color32::WHITE.gamma_multiply(a),
+                rect,
+                self.song_time,
+                &hud::CountdownInfo {
+                    title: &self.title,
+                    subtitle: &self.subtitle,
+                    tint: self.tint,
+                },
+                reduce,
             );
         }
         if self.pause.is_some() {
             self.draw_pause(ui, shared);
+        }
+    }
+
+    /// Plays a beep on 3, 2, 1 and a big chord when the music starts.
+    fn countdown_sounds(&mut self, shared: &mut Shared) {
+        let step = if self.song_time >= 0.0 {
+            0
+        } else {
+            (-self.song_time).ceil() as i32
+        };
+        if step <= 3 && step < self.count_played {
+            self.count_played = step;
+            shared.sfx(if step == 0 {
+                crate::audio::Sfx::Go
+            } else {
+                crate::audio::Sfx::Count
+            });
         }
     }
 
@@ -662,12 +694,12 @@ impl GameplayScreen {
                 p.selected = i;
             }
         }
-        painter.text(
-            card.center_bottom() - vec2(0.0, 20.0),
+        widgets::key_hints(
+            &painter,
+            card.center_bottom() + vec2(0.0, 36.0),
             Align2::CENTER_CENTER,
-            "Esc untuk melanjutkan",
-            font(theme::TEXT_XS),
-            palette.text_dim,
+            &[("↑ ↓", "Pilih"), ("Enter", "OK"), ("Esc", "Lanjutkan")],
+            &palette,
         );
         if let Some(i) = clicked {
             if let Some(p) = &mut self.pause {

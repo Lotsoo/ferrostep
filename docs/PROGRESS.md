@@ -178,3 +178,7 @@ Di sesi Wayland, zona impor otomatis berganti teks "Klik untuk memilih file" (di
 - Fase lanjut: BPM bervariasi, video latar MP4, editor chart, mode latihan, statistik riwayat,
   ikon .exe Windows (winres), AppImage.
 - Drag-and-drop di Wayland menunggu dukungan winit.
+
+## Sesi 2026-11-21 (lanjutan, belum di-commit)
+- Selesai: hold-to-repeat menu (keyboard & mat), efek suara arcade baru (stereo, reverb, saturasi; volume efek tidak ikut volume musik), hitung mundur 5 detik (kartu BERSIAP → 3-2-1 dengan flash/shockwave + suara → MULAI!), dialog konfirmasi keluar, badge grade berwarna, petunjuk tombol tebal, impor duplikat dilewati (hash, byte, fingerprint chart).
+- Berikutnya: pengguna menilai suara baru; update ARCHITECTURE/README; commit batch ini; screenshot dialog keluar.

@@ -1,6 +1,7 @@
 //! Audio playback built on `kira`: music, song previews and UI sounds.
 
 pub mod clock;
+pub mod sfx;
 
 use std::f32::consts::TAU;
 use std::path::Path;
@@ -11,9 +12,11 @@ use anyhow::{Context, Result, anyhow};
 use kira::sound::static_sound::StaticSoundData;
 use kira::sound::streaming::{StreamingSoundData, StreamingSoundHandle};
 use kira::sound::{FromFileError, PlaybackState};
+use kira::track::{TrackBuilder, TrackHandle};
 use kira::{AudioManager, AudioManagerSettings, Decibels, DefaultBackend, Frame, Tween};
 
 pub use clock::AudioClock;
+pub use sfx::Sfx;
 
 /// Sample rate used for sounds generated in code.
 const SYNTH_SAMPLE_RATE: u32 = 44_100;
@@ -24,6 +27,15 @@ pub fn volume_to_db(volume: f32) -> Decibels {
         Decibels::SILENCE
     } else {
         Decibels(20.0 * volume.clamp(0.0, 1.0).powf(1.5).log10())
+    }
+}
+
+/// Menu-sound slider: gentler curve than music, so 70% is still loud.
+fn sfx_volume_to_db(volume: f32) -> Decibels {
+    if volume <= 0.001 {
+        Decibels::SILENCE
+    } else {
+        Decibels(20.0 * volume.clamp(0.0, 1.0).sqrt().log10())
     }
 }
 
@@ -80,26 +92,82 @@ pub struct Audio {
     manager: AudioManager<DefaultBackend>,
     click: StaticSoundData,
     click_accent: StaticSoundData,
+    /// Menu sounds, indexed by [`Sfx::index`].
+    sfx: Vec<StaticSoundData>,
+    /// Separate mixer track so menu sounds have their own volume.
+    sfx_track: Option<TrackHandle>,
+    /// Current slider values, so menu sounds can ignore the music volume.
+    master_volume: f32,
+    sfx_volume: f32,
 }
 
 impl Audio {
     /// Opens the default audio output device.
     pub fn new() -> Result<Self> {
-        let manager = AudioManager::<DefaultBackend>::new(AudioManagerSettings::default())
+        let mut manager = AudioManager::<DefaultBackend>::new(AudioManagerSettings::default())
             .map_err(|e| anyhow!("{e}"))
             .context("could not open the audio output device")?;
+        let sfx_track = manager
+            .add_sub_track(TrackBuilder::new())
+            .map_err(|e| log::warn!("no separate track for menu sounds: {e}"))
+            .ok();
         Ok(Self {
             manager,
             click: sine_burst(1320.0, 0.04, 0.5),
             click_accent: sine_burst(1760.0, 0.04, 0.7),
+            sfx: Sfx::ALL
+                .iter()
+                .map(|s| stereo_sound(sfx::render(*s, SYNTH_SAMPLE_RATE)))
+                .collect(),
+            sfx_track,
+            master_volume: 1.0,
+            sfx_volume: 1.0,
         })
     }
 
     /// Sets the master volume (0..=1).
     pub fn set_volume(&mut self, volume: f32) {
+        self.master_volume = volume;
         self.manager
             .main_track()
             .set_volume(volume_to_db(volume), tween_ms(50));
+        self.apply_sfx_volume();
+    }
+
+    /// Sets the menu sound volume (0..=1). Independent of the music volume:
+    /// at 100% menu sounds play at full level even if the music is turned down
+    /// (only a fully muted master silences them).
+    pub fn set_sfx_volume(&mut self, volume: f32) {
+        self.sfx_volume = volume;
+        self.apply_sfx_volume();
+    }
+
+    fn apply_sfx_volume(&mut self) {
+        let master = volume_to_db(self.master_volume);
+        let wanted = sfx_volume_to_db(self.sfx_volume);
+        // The sfx track sits under the main track, so undo the master gain.
+        let db = if master == Decibels::SILENCE || wanted == Decibels::SILENCE {
+            Decibels::SILENCE
+        } else {
+            Decibels(wanted.0 - master.0)
+        };
+        if let Some(track) = &mut self.sfx_track {
+            track.set_volume(db, tween_ms(50));
+        }
+    }
+
+    /// Plays a menu sound effect.
+    pub fn play_sfx(&mut self, sfx: Sfx) {
+        let Some(sound) = self.sfx.get(sfx.index()).cloned() else {
+            return;
+        };
+        let result = match &mut self.sfx_track {
+            Some(track) => track.play(sound).map(|_| ()),
+            None => self.manager.play(sound).map(|_| ()),
+        };
+        if let Err(e) = result {
+            log::debug!("menu sound failed: {e}");
+        }
     }
 
     /// Starts streaming a music file from `start` seconds, with optional fade-in.
@@ -143,13 +211,32 @@ impl Audio {
 fn sine_burst(frequency: f32, seconds: f32, amp: f32) -> StaticSoundData {
     let total = (SYNTH_SAMPLE_RATE as f32 * seconds) as usize;
     let fade = (SYNTH_SAMPLE_RATE as f32 * 0.004) as usize;
-    let frames: Vec<Frame> = (0..total)
+    let samples: Vec<f32> = (0..total)
         .map(|i| {
             let t = i as f32 / SYNTH_SAMPLE_RATE as f32;
             let envelope = (i.min(total - i) as f32 / fade as f32).min(1.0);
-            Frame::from_mono((TAU * frequency * t).sin() * amp * envelope)
+            (TAU * frequency * t).sin() * amp * envelope
         })
         .collect();
+    mono_sound(samples)
+}
+
+/// Wraps mono samples (at the synth sample rate) as a playable sound.
+fn mono_sound(samples: Vec<f32>) -> StaticSoundData {
+    frames_sound(samples.into_iter().map(Frame::from_mono).collect())
+}
+
+/// Wraps stereo samples `[left, right]` (at the synth sample rate).
+fn stereo_sound(samples: Vec<[f32; 2]>) -> StaticSoundData {
+    frames_sound(
+        samples
+            .into_iter()
+            .map(|[left, right]| Frame { left, right })
+            .collect(),
+    )
+}
+
+fn frames_sound(frames: Vec<Frame>) -> StaticSoundData {
     StaticSoundData {
         sample_rate: SYNTH_SAMPLE_RATE,
         frames: Arc::from(frames),

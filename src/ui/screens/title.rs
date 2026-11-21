@@ -208,17 +208,17 @@ impl TitleScreen {
             }
         }
 
-        let hint = if shared.gamepad_name.is_some() {
-            "Injak ↑ ↓ untuk memilih · → untuk masuk"
+        let hints: &[(&str, &str)] = if shared.gamepad_name.is_some() {
+            &[("↑ ↓", "Injak untuk memilih"), ("→", "Masuk")]
         } else {
-            "↑ ↓ untuk memilih · Enter untuk masuk · Esc untuk keluar"
+            &[("↑ ↓", "Pilih"), ("Enter", "Masuk"), ("Esc", "Keluar")]
         };
-        painter.text(
-            rect.center_bottom() - vec2(0.0, 28.0),
+        widgets::key_hints(
+            &painter,
+            rect.center_bottom() - vec2(0.0, 32.0),
             Align2::CENTER_CENTER,
-            hint,
-            font(theme::TEXT_XS),
-            palette.text_dim,
+            hints,
+            &palette,
         );
         if let Some(m) = &self.music
             && !m.music.is_stopped()

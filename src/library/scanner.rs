@@ -3,13 +3,84 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use crate::parser::{Simfile, load_simfile};
+use crate::parser::{NoteKind, Simfile, load_simfile};
 use crate::timing::{TimingMap, time_notes};
 
 use super::find_music;
 
 /// Credit written by the importer; used for the "Auto" badge.
 pub const AUTO_CREDIT: &str = "Ferrostep Auto-Chart";
+/// Hidden file in an imported song folder that remembers which file it came
+/// from (content hash), so the same file is never imported or listed twice.
+pub const SOURCE_FILE: &str = ".ferrostep-source";
+
+/// Content hash of the file an imported song was made from.
+pub fn read_source_hash(dir: &Path) -> Option<u64> {
+    let text = std::fs::read_to_string(dir.join(SOURCE_FILE)).ok()?;
+    text.lines()
+        .find_map(|l| l.strip_prefix("hash="))
+        .and_then(|h| u64::from_str_radix(h.trim(), 16).ok())
+}
+
+/// Writes the source marker (see [`SOURCE_FILE`]).
+pub fn write_source_hash(dir: &Path, hash: u64, size: u64) -> std::io::Result<()> {
+    std::fs::write(
+        dir.join(SOURCE_FILE),
+        format!("hash={hash:016x}\nsize={size}\n"),
+    )
+}
+
+/// Identifies an imported song by what was generated from its audio: timing
+/// plus every note of every chart. Title and artist are left out on purpose:
+/// for untagged files they come from the file name, which may differ.
+pub fn fingerprint(simfile: &Simfile) -> String {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    for chart in &simfile.charts {
+        chart.steps_type.hash(&mut h);
+        format!("{:?}", chart.difficulty).hash(&mut h);
+        for n in &chart.notes {
+            // Rounded like the .sm writer, so in-memory and on-disk versions agree.
+            let kind = match n.kind {
+                NoteKind::HoldHead { end_beat } => format!("hold{end_beat:.3}"),
+                NoteKind::RollHead { end_beat } => format!("roll{end_beat:.3}"),
+                other => format!("{other:?}"),
+            };
+            format!("{:.3}:{}:{kind}", n.beat, n.column).hash(&mut h);
+        }
+    }
+    let bpms: Vec<String> = simfile
+        .timing
+        .bpms
+        .iter()
+        .map(|(b, v)| format!("{b:.3}={v:.3}"))
+        .collect();
+    format!("{bpms:?}|{:.3}|{:016x}", simfile.timing.offset, h.finish())
+}
+
+/// Hides repeated imports of the same file; the first folder (by name) wins.
+/// Folders are only hidden, never deleted.
+fn hide_duplicate_imports(songs: &mut Vec<SongEntry>) {
+    let mut hashes = std::collections::HashSet::new();
+    let mut prints = std::collections::HashSet::new();
+    songs.retain(|song| {
+        if !song.is_auto {
+            return true;
+        }
+        let hash = read_source_hash(&song.dir);
+        let print = fingerprint(&song.simfile);
+        let duplicate = prints.contains(&print) || hash.is_some_and(|h| hashes.contains(&h));
+        // Remember both identities even for hidden copies, so a copy that
+        // matches a hidden one (by the other identity) is hidden too.
+        prints.insert(print);
+        hashes.extend(hash);
+        if duplicate {
+            log::info!("hiding duplicate import {}", song.dir.display());
+            return false;
+        }
+        true
+    });
+}
 
 /// One song in the library.
 #[derive(Debug, Clone)]
@@ -139,7 +210,8 @@ pub fn load_song(dir: &Path, group: &str) -> Option<SongEntry> {
     })
 }
 
-fn subdirs(dir: &Path) -> Vec<PathBuf> {
+/// Song folders inside `dir`, sorted, without hidden ones.
+pub fn subdirs(dir: &Path) -> Vec<PathBuf> {
     let Ok(rd) = std::fs::read_dir(dir) else {
         return Vec::new();
     };
@@ -173,6 +245,7 @@ pub fn scan(root: &Path) -> Vec<SongEntry> {
             songs.extend(load_song(&song, &name));
         }
     }
+    hide_duplicate_imports(&mut songs);
     songs.sort_by_key(|s| (s.group.to_lowercase(), s.title().to_lowercase()));
     songs
 }
@@ -199,5 +272,36 @@ mod tests {
         assert_eq!(songs[0].group, "Group");
         assert_eq!(songs[0].title(), "From SSC");
         assert_eq!(songs[0].bpm_label, "120");
+    }
+
+    #[test]
+    fn repeated_imports_are_listed_once() {
+        let root = std::env::temp_dir().join(format!("ferrostep-dupes-{}", std::process::id()));
+        let chart = |title: &str| {
+            // Different songs get different notes, like real imports.
+            let row = if title == "Different" { "0100" } else { "1000" };
+            format!(
+                "#TITLE:{title};#CREDIT:{AUTO_CREDIT};#BPMS:0=120;\
+                 #NOTES:dance-single::Easy:1::{row}\n0000\n0000\n0000\n;"
+            )
+        };
+        let make = |name: &str, title: &str, hash: Option<u64>| {
+            let dir = root.join("Imported").join(name);
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(dir.join("song.sm"), chart(title)).unwrap();
+            if let Some(h) = hash {
+                write_source_hash(&dir, h, 1).unwrap();
+            }
+        };
+        make("Song", "Song", Some(7)); // original
+        make("Song (2)", "Song", None); // old import: same content, no marker
+        make("Renamed", "Other title", Some(7)); // same file, different tags
+        make("Different", "Different", Some(8));
+        let songs = scan(&root);
+        let _ = std::fs::remove_dir_all(&root);
+        let names: Vec<String> = songs.iter().map(|s| s.title()).collect();
+        // Folders are checked in name order: "Renamed" comes first and keeps the
+        // file; "Song" (same file) and "Song (2)" (same as "Song") are hidden.
+        assert_eq!(names, ["Different", "Other title"]);
     }
 }

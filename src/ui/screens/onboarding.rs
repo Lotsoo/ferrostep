@@ -32,6 +32,11 @@ impl Default for OnboardingScreen {
 }
 
 impl OnboardingScreen {
+    /// True while the offset calibration is running (it needs silence).
+    pub fn is_calibrating(&self) -> bool {
+        self.calibration.is_some()
+    }
+
     fn next(&mut self) {
         self.step += 1;
         self.calibration = None;

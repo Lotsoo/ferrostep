@@ -6,6 +6,9 @@
 pub mod gamepad;
 pub mod profiles;
 
+mod repeat;
+pub use repeat::{MenuRepeat, RepeatSource};
+
 use std::time::Instant;
 
 use eframe::egui;
@@ -87,6 +90,7 @@ fn menu_for_key(key: egui::Key) -> Option<MenuAction> {
 /// Collects input from all devices.
 pub struct InputHub {
     pub gamepads: Gamepads,
+    repeat: MenuRepeat,
 }
 
 /// Menu action for a dance mat panel.
@@ -103,6 +107,7 @@ impl InputHub {
     pub fn new(ctx: &egui::Context) -> Self {
         Self {
             gamepads: Gamepads::new(ctx),
+            repeat: MenuRepeat::default(),
         }
     }
 
@@ -139,7 +144,10 @@ impl InputHub {
                     && let Some(action) = menu_for_key(key)
                 {
                     frame.menu.push(action);
+                    self.repeat.press(RepeatSource::Key(key), action, now);
                 }
+            } else {
+                self.repeat.release(RepeatSource::Key(key));
             }
             if let Some(column) = column_for_key(settings, key) {
                 frame.columns.push(ColumnEvent {
@@ -158,8 +166,12 @@ impl InputHub {
                     pressed,
                     at,
                 } => {
+                    let action = menu_for_column(column);
                     if pressed {
-                        frame.menu.push(menu_for_column(column));
+                        frame.menu.push(action);
+                        self.repeat.press(RepeatSource::Column(column), action, now);
+                    } else {
+                        self.repeat.release(RepeatSource::Column(column));
                     }
                     frame.columns.push(ColumnEvent {
                         column,
@@ -170,8 +182,25 @@ impl InputHub {
                 }
                 PadEvent::Start => frame.menu.push(MenuAction::Confirm),
                 PadEvent::Back => frame.menu.push(MenuAction::Back),
-                other => frame.pad_events.push(other),
+                other => {
+                    if matches!(other, PadEvent::Disconnected { .. }) {
+                        self.repeat.clear();
+                    }
+                    frame.pad_events.push(other);
+                }
             }
+        }
+
+        // Hold-to-repeat. A key released while the window was unfocused sends
+        // no event, so check that it is really still down.
+        if let Some(RepeatSource::Key(key)) = self.repeat.source()
+            && !ctx.input(|i| i.keys_down.contains(&key) && i.focused)
+        {
+            self.repeat.clear();
+        }
+        frame.menu.extend(self.repeat.tick(now));
+        if let Some(due) = self.repeat.next_due() {
+            ctx.request_repaint_after(due.saturating_duration_since(now));
         }
         if !frame.pad_events.is_empty() || !frame.columns.is_empty() {
             ctx.request_repaint();

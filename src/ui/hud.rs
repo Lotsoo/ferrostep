@@ -4,7 +4,7 @@
 //! Everything here only draws; state lives in [`HudAnim`] and the game session.
 
 use std::collections::VecDeque;
-use std::f32::consts::{FRAC_PI_2, TAU};
+use std::f32::consts::TAU;
 use std::time::Instant;
 
 use eframe::egui::{
@@ -36,6 +36,9 @@ pub struct HudAnim {
     /// Recent presses: offset in ms (positive = late), color, when.
     hits: VecDeque<(f32, Color32, Instant)>,
     milestone: Option<(u32, Instant)>,
+    /// Current live grade and when it last changed (for the pop).
+    grade: (&'static str, Option<Instant>),
+    reduce: bool,
     ready: bool,
 }
 
@@ -48,6 +51,8 @@ impl Default for HudAnim {
             beams: [0.0; 4],
             hits: VecDeque::new(),
             milestone: None,
+            grade: ("SS", None),
+            reduce: false,
             ready: false,
         }
     }
@@ -55,7 +60,13 @@ impl Default for HudAnim {
 
 impl HudAnim {
     /// Advances all animations by one frame.
-    pub fn update(&mut self, score: &Score, pressed: &[bool], dt: f32, reduce: bool) {
+    /// `failed` = the play is lost (never true with No Fail).
+    pub fn update(&mut self, score: &Score, failed: bool, pressed: &[bool], dt: f32, reduce: bool) {
+        self.reduce = reduce;
+        let grade = live_grade(score.accuracy_percent(), failed);
+        if grade != self.grade.0 {
+            self.grade = (grade, Some(Instant::now()));
+        }
         self.life.set_target(score.life.clamp(0.0, 1.0));
         self.accuracy.set_target(score.accuracy_percent() as f32);
         let energy = if score.combo >= 10 {
@@ -97,6 +108,16 @@ impl HudAnim {
     pub fn combo_changed(&mut self, combo: u32, now: Instant) {
         if combo > 0 && combo.is_multiple_of(MILESTONE) {
             self.milestone = Some((combo, now));
+        }
+    }
+
+    /// 1 right after the grade changed, fading to 0 within half a second.
+    fn grade_pop(&self) -> f32 {
+        match self.grade.1 {
+            Some(at) if !self.reduce => {
+                1.0 - anim::ease_out_cubic((at.elapsed().as_secs_f32() / 0.5).min(1.0))
+            }
+            _ => 0.0,
         }
     }
 
@@ -453,17 +474,16 @@ pub fn draw_song_island(painter: &Painter, screen: Rect, info: &SongInfo) {
     );
 }
 
-/// Live grade from the accuracy so far.
-fn live_grade(accuracy: f64, failed: bool) -> (&'static str, Color32, Color32) {
-    let gold = Color32::from_rgb(0xFF, 0xD8, 0x6B);
+/// Live grade from the accuracy so far (same thresholds as the results).
+fn live_grade(accuracy: f64, failed: bool) -> &'static str {
     match accuracy {
-        _ if failed => ("F", theme::DANGER, Color32::from_rgb(0x8A, 0x2A, 0x3A)),
-        a if a >= 99.0 => ("SS", Color32::from_rgb(0xE0, 0xF7, 0xFF), ACCENT_B),
-        a if a >= 95.0 => ("S", gold, Color32::from_rgb(0xFF, 0x9F, 0x5C)),
-        a if a >= 90.0 => ("A", theme::SUCCESS, Color32::from_rgb(0x2A, 0xB0, 0x8A)),
-        a if a >= 80.0 => ("B", ACCENT_B, ACCENT_A),
-        a if a >= 70.0 => ("C", Color32::from_rgb(0xB0, 0x7C, 0xFF), ACCENT_A),
-        _ => ("D", Color32::from_gray(170), Color32::from_gray(90)),
+        _ if failed => "F",
+        a if a >= 99.0 => "SS",
+        a if a >= 95.0 => "S",
+        a if a >= 90.0 => "A",
+        a if a >= 80.0 => "B",
+        a if a >= 70.0 => "C",
+        _ => "D",
     }
 }
 
@@ -481,9 +501,10 @@ pub fn draw_score_island(
     );
     glass(painter, rect);
 
-    let (grade, light, deep) = live_grade(score.accuracy_percent(), failed);
+    let grade = live_grade(score.accuracy_percent(), failed);
     let badge = Rect::from_min_size(rect.min + vec2(14.0, 14.0), vec2(58.0, 58.0));
-    draw_grade_badge(painter, badge, grade, light, deep);
+    let time = painter.ctx().input(|i| i.time) as f32;
+    draw_grade_badge(painter, badge, grade, hud.grade_pop(), time, hud.reduce);
 
     widgets::text_tracked(
         painter,
@@ -556,43 +577,71 @@ pub fn draw_score_island(
     }
 }
 
-/// Grade badge built for contrast: a near-black tile, a ring in the grade
-/// color, and the letter in the bright grade color (bright-on-dark reads at a
-/// glance even over a busy stage).
+/// Grade badge: a bright gradient in the grade's own color (gold SS, orange
+/// S, green A, blue B, violet C, grey D, red F), a soft glow, a light sweep,
+/// and a letter in whichever ink reads best on it. `pop` (0..1) briefly
+/// enlarges it when the grade changes.
 pub fn draw_grade_badge(
     painter: &Painter,
     badge: Rect,
     grade: &str,
-    light: Color32,
-    deep: Color32,
+    pop: f32,
+    time: f32,
+    reduce: bool,
 ) {
-    painter.rect_filled(badge, 14, Color32::from_rgb(12, 10, 24));
-    super::notefield::radial_light(painter, badge.center(), badge.width() * 0.75, deep, 0.35);
-    painter.rect_stroke(badge, 14, Stroke::new(2.0, light), StrokeKind::Inside);
-    let size = if grade.len() > 1 { 26.0 } else { 32.0 };
-    // A dark outline behind the letter keeps the edges crisp.
-    for d in [
-        vec2(0.0, 1.5),
-        vec2(0.0, -1.0),
-        vec2(1.0, 0.0),
-        vec2(-1.0, 0.0),
-    ] {
-        widgets::text_tracked(
-            painter,
-            badge.center() + d,
-            Align2::CENTER_CENTER,
-            grade,
-            font_bold(size),
-            Color32::from_black_alpha(200),
-        );
-    }
-    widgets::text_tracked(
+    let style = theme::grade_style(grade);
+    let badge = Rect::from_center_size(badge.center(), badge.size() * (1.0 + 0.14 * pop));
+    let radius = (badge.width() * 0.24) as u8;
+    super::notefield::radial_light(
         painter,
         badge.center(),
+        badge.width() * (1.15 + 0.3 * pop),
+        style.glow,
+        0.45 + 0.4 * pop,
+    );
+    gradient_tile(painter, badge, radius, style.top, style.bottom);
+    // Glossy top half and a bright rim.
+    let gloss = Rect::from_min_max(badge.min, pos2(badge.right(), badge.center().y));
+    painter.with_clip_rect(gloss).rect_filled(
+        badge.shrink(2.0),
+        radius,
+        Color32::WHITE.gamma_multiply(0.16),
+    );
+    painter.rect_stroke(
+        badge,
+        radius,
+        Stroke::new(1.5, Color32::WHITE.gamma_multiply(0.55)),
+        StrokeKind::Inside,
+    );
+    // A diagonal light sweep every few seconds.
+    if !reduce {
+        let cycle = (time / 3.2).fract();
+        if cycle < 0.3 {
+            let x = badge.left() - badge.width() * 0.4 + badge.width() * 1.8 * (cycle / 0.3);
+            let w = badge.width() * 0.18;
+            let h = badge.height();
+            painter
+                .with_clip_rect(badge.shrink(2.0))
+                .add(Shape::convex_polygon(
+                    vec![
+                        pos2(x, badge.bottom()),
+                        pos2(x + w, badge.bottom()),
+                        pos2(x + w + h * 0.5, badge.top()),
+                        pos2(x + h * 0.5, badge.top()),
+                    ],
+                    Color32::WHITE.gamma_multiply(0.35),
+                    Stroke::NONE,
+                ));
+        }
+    }
+    let size = badge.height() * if grade.len() > 1 { 0.46 } else { 0.58 };
+    widgets::text_tracked(
+        painter,
+        badge.center() + vec2(0.0, size * 0.03),
         Align2::CENTER_CENTER,
         grade,
         font_bold(size),
-        light,
+        style.text,
     );
 }
 
@@ -814,45 +863,249 @@ pub fn draw_arc(
     painter.add(PathShape::line(points, stroke));
 }
 
-/// Lead-in countdown: a ring that drains each second around a popping number.
-pub fn draw_countdown(painter: &Painter, center: Pos2, seconds_left: f64, reduce: bool) {
-    let n = seconds_left.ceil() as i32;
-    if n < 1 {
+/// Total lead-in before the music starts (seconds): a 2 s "get ready" card,
+/// then 3, 2, 1.
+pub const LEAD_IN: f64 = 5.0;
+
+/// What the "get ready" card shows.
+pub struct CountdownInfo<'a> {
+    pub title: &'a str,
+    pub subtitle: &'a str,
+    pub tint: Color32,
+}
+
+/// Number color: each count feels different (cyan, violet, pink), "GO" is gold.
+fn count_color(n: i32) -> Color32 {
+    match n {
+        3 => ACCENT_B,
+        2 => ACCENT_A,
+        1 => Color32::from_rgb(0xFF, 0x5C, 0x8A),
+        _ => Color32::from_rgb(0xFF, 0xD8, 0x4D),
+    }
+}
+
+/// Text with a dark outline so it reads over anything.
+fn outlined(painter: &Painter, pos: Pos2, text: &str, size: f32, color: Color32, alpha: f32) {
+    let outline = Color32::from_black_alpha((170.0 * alpha) as u8);
+    let o = (size * 0.035).max(1.5);
+    for d in [
+        vec2(o, 0.0),
+        vec2(-o, 0.0),
+        vec2(0.0, o),
+        vec2(0.0, -o),
+        vec2(0.0, o * 2.0),
+    ] {
+        widgets::text_tracked(
+            painter,
+            pos + d,
+            Align2::CENTER_CENTER,
+            text,
+            font_bold(size),
+            outline,
+        );
+    }
+    widgets::text_tracked(
+        painter,
+        pos,
+        Align2::CENTER_CENTER,
+        text,
+        font_bold(size),
+        color.gamma_multiply(alpha),
+    );
+}
+
+/// The countdown. `song_time` runs from −[`LEAD_IN`] to about +0.9 s:
+/// get-ready card → 3, 2, 1 (each slams in with a shockwave and a flash)
+/// → "MULAI!".
+pub fn draw_countdown(
+    painter: &Painter,
+    rect: Rect,
+    song_time: f64,
+    info: &CountdownInfo,
+    reduce: bool,
+) {
+    let center = rect.center();
+    if song_time < -3.0 {
+        draw_get_ready(painter, rect, song_time, info, reduce);
         return;
     }
-    let frac = seconds_left.fract() as f32; // 1 → 0 within each second
-    let frac = if frac == 0.0 { 1.0 } else { frac };
-    let pop = if reduce {
+    let (n, age) = if song_time < 0.0 {
+        let n = (-song_time).ceil() as i32;
+        (n, (song_time + f64::from(n)) as f32) // 0 → 1 within this second
+    } else {
+        (0, song_time as f32)
+    };
+    let life = if n == 0 { 0.9 } else { 1.0 };
+    if age > life {
+        return;
+    }
+    let color = count_color(n);
+    let fade = if n == 0 {
+        (1.0 - (age - 0.5).max(0.0) / 0.4).clamp(0.0, 1.0)
+    } else {
+        (1.0 - (age - 0.75).max(0.0) / 0.25).clamp(0.0, 1.0)
+    };
+
+    if !reduce {
+        // Flash: the whole screen lights up for an instant in the number's color.
+        let flash = (1.0 - age / 0.22).max(0.0);
+        if flash > 0.0 {
+            painter.rect_filled(rect, 0, color.gamma_multiply(0.22 * flash));
+        }
+        // Shockwave rings.
+        let e = anim::ease_out_cubic((age / 0.6).min(1.0));
+        for (k, delay) in [(0.0f32, 0.0f32), (1.0, 0.08)] {
+            let e2 = anim::ease_out_cubic(((age - delay) / 0.6).clamp(0.0, 1.0));
+            if e2 <= 0.0 {
+                continue;
+            }
+            painter.circle_stroke(
+                center,
+                70.0 + e2 * rect.height() * 0.55,
+                Stroke::new(
+                    (8.0 - k * 3.0) * (1.0 - e2),
+                    color.gamma_multiply((1.0 - e2) * 0.9),
+                ),
+            );
+        }
+        // Burst of sparks.
+        for i in 0..18 {
+            let a = i as f32 / 18.0 * TAU + n as f32;
+            let d = 80.0 + e * (180.0 + (i % 3) as f32 * 60.0);
+            painter.circle_filled(
+                center + vec2(a.cos(), a.sin()) * d,
+                3.5 * (1.0 - e) + 0.5,
+                color
+                    .lerp_to_gamma(Color32::WHITE, 0.4)
+                    .gamma_multiply(1.0 - e),
+            );
+        }
+    }
+    // Dark halo so the number is the brightest thing on screen.
+    super::notefield::radial_light(painter, center, 260.0, Color32::BLACK, 0.55 * fade);
+    super::notefield::radial_light(painter, center, 200.0, color, 0.45 * fade);
+
+    // Slam: starts big, lands with a small overshoot.
+    let slam = if reduce {
         1.0
     } else {
-        1.0 + 0.25 * anim::ease_out_cubic(((frac - 0.8) / 0.2).clamp(0.0, 1.0))
+        let land = anim::ease_out_back((age / 0.22).min(1.0));
+        2.2 - 1.2 * land - 0.06 * (age - 0.22).max(0.0)
     };
-    let r = 64.0;
-    painter.circle_filled(center, r + 8.0, Color32::from_black_alpha(90));
-    painter.circle_stroke(center, r, Stroke::new(4.0, Color32::from_white_alpha(20)));
-    draw_arc(
+    let (text, size) = if n == 0 {
+        ("MULAI!", 104.0)
+    } else {
+        (["", "1", "2", "3"][n as usize], 168.0)
+    };
+    outlined(
         painter,
         center,
-        r,
-        -FRAC_PI_2,
-        TAU * frac,
-        Stroke::new(4.0, ACCENT_B.lerp_to_gamma(ACCENT_A, 1.0 - frac)),
+        text,
+        size * slam,
+        color.lerp_to_gamma(Color32::WHITE, 0.25),
+        fade,
     );
-    painter.text(
-        center,
-        Align2::CENTER_CENTER,
-        n.to_string(),
-        font_bold(56.0 * pop),
-        Color32::WHITE.gamma_multiply(0.95),
+    if n > 0 {
+        widgets::text_tracked(
+            painter,
+            center + vec2(0.0, 120.0),
+            Align2::CENTER_CENTER,
+            "BERSIAP",
+            font_bold(theme::TEXT_S),
+            Color32::WHITE.gamma_multiply(0.7 * fade),
+        );
+    }
+}
+
+/// First two seconds: song card, controls reminder and a filling bar.
+fn draw_get_ready(
+    painter: &Painter,
+    rect: Rect,
+    song_time: f64,
+    info: &CountdownInfo,
+    reduce: bool,
+) {
+    let elapsed = (song_time + LEAD_IN) as f32; // 0 → 2
+    let appear = if reduce {
+        1.0
+    } else {
+        anim::ease_out_cubic((elapsed / 0.35).min(1.0))
+    };
+    let leave = ((2.0 - elapsed) / 0.2).clamp(0.0, 1.0);
+    let alpha = appear * leave;
+    let card = Rect::from_center_size(
+        rect.center() + vec2(0.0, (1.0 - appear) * 30.0),
+        vec2(460.0, 250.0),
+    );
+    painter.rect_filled(rect, 0, Color32::from_black_alpha((90.0 * alpha) as u8));
+    super::notefield::radial_light(painter, card.center(), 380.0, info.tint, 0.35 * alpha);
+    glass(painter, card);
+    painter.rect_filled(
+        card,
+        theme::RADIUS_CARD,
+        Color32::from_rgba_unmultiplied(22, 20, 40, (60.0 * (1.0 - alpha)) as u8),
     );
     widgets::text_tracked(
         painter,
-        center + vec2(0.0, r + 30.0),
+        card.center_top() + vec2(0.0, 34.0),
         Align2::CENTER_CENTER,
         "BERSIAP",
-        font_bold(theme::TEXT_XS),
-        Color32::WHITE.gamma_multiply(0.55),
+        font_bold(theme::TEXT_S),
+        ACCENT_B.gamma_multiply(alpha),
     );
+    widgets::text_tracked(
+        painter,
+        card.center_top() + vec2(0.0, 76.0),
+        Align2::CENTER_CENTER,
+        &crate::ui::screens::song_select::truncate(info.title, 26),
+        font_bold(theme::TEXT_XL),
+        Color32::WHITE.gamma_multiply(alpha),
+    );
+    painter.text(
+        card.center_top() + vec2(0.0, 110.0),
+        Align2::CENTER_CENTER,
+        info.subtitle,
+        font(theme::TEXT_S),
+        Color32::WHITE.gamma_multiply(0.7 * alpha),
+    );
+    // Works for keyboard and dance mat alike: the four arrows, and what to do.
+    for c in 0..4u8 {
+        let center = card.center_top() + vec2((f32::from(c) - 1.5) * 44.0, 146.0);
+        super::notefield::draw_arrow(
+            painter,
+            center,
+            30.0,
+            c,
+            column_color(c).gamma_multiply(alpha),
+            Stroke::new(1.5, Color32::WHITE.gamma_multiply(0.8 * alpha)),
+        );
+    }
+    painter.text(
+        card.center_top() + vec2(0.0, 176.0),
+        Align2::CENTER_CENTER,
+        "Tekan atau injak saat panah menyentuh sasaran",
+        font_bold(theme::TEXT_S),
+        Color32::WHITE.gamma_multiply(0.9 * alpha),
+    );
+    // Filling bar: how long until the count starts.
+    let bar = Rect::from_center_size(
+        card.center_bottom() - vec2(0.0, 30.0),
+        vec2(card.width() - 80.0, 6.0),
+    );
+    painter.rect_filled(
+        bar,
+        theme::RADIUS_PILL,
+        Color32::from_white_alpha((20.0 * alpha) as u8),
+    );
+    let p = (elapsed / 2.0).clamp(0.0, 1.0);
+    if p > 0.0 {
+        widgets::gradient_pill(
+            painter,
+            Rect::from_min_size(bar.min, vec2(bar.width() * p, bar.height())),
+            ACCENT_A.gamma_multiply(alpha),
+            ACCENT_B.gamma_multiply(alpha),
+        );
+    }
 }
 
 #[cfg(test)]
@@ -861,10 +1114,10 @@ mod tests {
 
     #[test]
     fn grade_follows_accuracy() {
-        assert_eq!(live_grade(100.0, false).0, "SS");
-        assert_eq!(live_grade(96.0, false).0, "S");
-        assert_eq!(live_grade(50.0, false).0, "D");
-        assert_eq!(live_grade(100.0, true).0, "F");
+        assert_eq!(live_grade(100.0, false), "SS");
+        assert_eq!(live_grade(96.0, false), "S");
+        assert_eq!(live_grade(50.0, false), "D");
+        assert_eq!(live_grade(100.0, true), "F");
     }
 
     #[test]

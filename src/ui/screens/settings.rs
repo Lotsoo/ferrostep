@@ -77,6 +77,11 @@ pub struct SettingsScreen {
 }
 
 impl SettingsScreen {
+    /// True while the offset calibration is running (it needs silence).
+    pub fn is_calibrating(&self) -> bool {
+        self.calibration.is_some()
+    }
+
     pub fn new(category: Option<Category>) -> Self {
         Self {
             category: category.unwrap_or(Category::Gameplay),
@@ -814,6 +819,25 @@ fn audio_section(ui: &mut Ui, shared: &mut Shared) -> bool {
                 .changed()
             {
                 s.volume = pct / 100.0;
+            }
+        },
+    );
+    setting_row(
+        ui,
+        &palette,
+        "Efek suara menu",
+        "Bunyi saat memilih, berpindah menu, dan memulai lagu. 0% = mati.",
+        |ui| {
+            let mut pct = s.sfx_volume * 100.0;
+            if ui
+                .add(
+                    egui::Slider::new(&mut pct, 0.0..=100.0)
+                        .step_by(1.0)
+                        .suffix("%"),
+                )
+                .changed()
+            {
+                s.sfx_volume = pct / 100.0;
             }
         },
     );

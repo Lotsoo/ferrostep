@@ -217,6 +217,7 @@ impl ImportScreen {
                         shared
                             .toasts
                             .success(format!("“{}” siap dimainkan!", result.simfile.meta.title));
+                        shared.sfx(crate::audio::Sfx::Success);
                     }
                     shared.library.mark_new(result.dir.clone());
                     self.bpm_text = format_bpm(result.bpm());
@@ -239,7 +240,14 @@ impl ImportScreen {
         let now = input.now;
         let ctx = ui.ctx().clone();
         self.poll(shared, now);
+        let was_summary = matches!(self.phase, Phase::Summary);
         self.advance_batch();
+        if !was_summary
+            && matches!(self.phase, Phase::Summary)
+            && self.batch.iter().any(|e| e.outcome.is_ok())
+        {
+            shared.sfx(crate::audio::Sfx::Success);
+        }
         if matches!(self.phase, Phase::Idle) {
             self.start_next(shared, &ctx);
         }
@@ -303,6 +311,11 @@ impl ImportScreen {
             Phase::Summary => self.draw_summary(ui, shared, content),
         };
         nav.or(local)
+    }
+
+    /// Stops the running import and drops the queue (app is closing).
+    pub fn cancel_all(&mut self) {
+        self.cancel();
     }
 
     fn cancel(&mut self) {

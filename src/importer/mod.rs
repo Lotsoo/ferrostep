@@ -19,9 +19,11 @@ use crate::audio_dsp::onset::waveform_peaks;
 use crate::audio_dsp::tempo::best_phase;
 use crate::audio_dsp::{Analysis, analyze};
 use crate::chart_gen::{SongInfo, average_nps, generate_all};
-use crate::library::scanner::AUTO_CREDIT;
+use crate::library::scanner::{
+    AUTO_CREDIT, find_simfile, fingerprint, read_source_hash, subdirs, write_source_hash,
+};
 use crate::parser::writer::write_sm;
-use crate::parser::{Chart, Metadata, Simfile, TimingData};
+use crate::parser::{Chart, Metadata, Simfile, TimingData, load_simfile};
 
 /// File types the importer accepts.
 pub const IMPORT_EXTENSIONS: [&str; 8] = ["mp3", "mp4", "m4a", "ogg", "wav", "flac", "aac", "oga"];
@@ -77,7 +79,9 @@ impl Stage {
 pub struct ImportResult {
     pub dir: PathBuf,
     pub simfile: Simfile,
-    pub analysis: Arc<Analysis>,
+    /// Beat analysis; `None` when an already imported song was reused (it is
+    /// computed on demand if the BPM is corrected).
+    pub analysis: Option<Arc<Analysis>>,
     pub seed: u64,
     /// Whether ffmpeg was used to make a compact `.ogg`.
     pub used_ffmpeg: bool,
@@ -103,18 +107,33 @@ impl ImportResult {
 
     fn song_info(&self, bpm: f64, offset: f64) -> SongInfo<'_> {
         SongInfo {
-            onsets: &self.analysis.onsets,
+            onsets: self.analysis.as_ref().map_or(&[], |a| &a.onsets),
             bpm,
             offset,
-            duration: self.analysis.duration,
+            duration: self.analysis.as_ref().map_or(0.0, |a| a.duration),
             seed: self.seed,
         }
+    }
+
+    /// Analyzes the song's audio if that was skipped (reused import).
+    fn ensure_analysis(&mut self) -> Result<()> {
+        if self.analysis.is_some() {
+            return Ok(());
+        }
+        let music = crate::library::find_music(&self.dir, &self.simfile.meta.music)
+            .context("file audio lagu tidak ditemukan")?;
+        let decoded = decode_file(&music, None, &AtomicBool::new(false), &mut |_| {})?;
+        let analysis = analyze(&decoded.samples, decoded.sample_rate, &mut |_| {})?;
+        self.analysis = Some(Arc::new(analysis));
+        Ok(())
     }
 
     /// Regenerates the charts with a corrected BPM and rewrites the simfile.
     pub fn set_bpm(&mut self, bpm: f64) -> Result<()> {
         let bpm = bpm.clamp(20.0, 400.0);
-        let first_beat = best_phase(&self.analysis.onsets, 60.0 / bpm);
+        self.ensure_analysis()?;
+        let onsets = self.analysis.as_ref().map_or(&[][..], |a| &a.onsets);
+        let first_beat = best_phase(onsets, 60.0 / bpm);
         let offset = -first_beat;
         let charts = generate_all(&self.song_info(bpm, offset));
         self.simfile.timing = timing(bpm, offset);
@@ -279,11 +298,24 @@ fn run(
     let bytes =
         fs::read(source).with_context(|| format!("tidak bisa membaca {}", file_name(source)))?;
     let seed = fnv1a(&bytes);
+    let source_size = bytes.len() as u64;
     let ext = source
         .extension()
         .and_then(|e| e.to_str())
         .unwrap_or("")
         .to_ascii_lowercase();
+    // Same file imported before: reuse that song, no analysis, no second copy.
+    if let Some(existing) = find_existing(target, seed, &bytes, &ext)
+        && let Some(result) = reuse(&existing, seed, started)
+    {
+        log::info!(
+            "{} was imported before: reusing {}",
+            file_name(source),
+            existing.display()
+        );
+        rep.progress(Stage::Saving, 1.0);
+        return Ok(result);
+    }
     fs::create_dir_all(staging).context("tidak bisa membuat folder di Songs/Imported")?;
     rep.progress(Stage::Reading, 1.0);
     check(cancel)?;
@@ -393,7 +425,27 @@ fn run(
         timing: timing(tempo.bpm, tempo.offset),
         charts,
     };
+    // Same song already imported from a different encoding of the file (e.g. an
+    // old MP4 import whose .ogg differs byte for byte): keep the existing one.
+    if let Some(existing) = find_same_song(target, &simfile) {
+        let _ = fs::remove_dir_all(staging);
+        if let Err(e) = write_source_hash(&existing, seed, source_size) {
+            log::debug!("could not mark {}: {e}", existing.display());
+        }
+        log::info!(
+            "{} matches {}: not saved again",
+            file_name(source),
+            existing.display()
+        );
+        let mut result = reuse(&existing, seed, started).context("lagu tidak bisa dibaca")?;
+        result.analysis = Some(Arc::new(analysis));
+        rep.progress(Stage::Saving, 1.0);
+        return Ok(result);
+    }
     fs::write(staging.join(SIMFILE_NAME), write_sm(&simfile)).context("gagal menulis simfile")?;
+    if let Err(e) = write_source_hash(staging, seed, source_size) {
+        log::warn!("could not write the source marker: {e}");
+    }
     check(cancel)?;
     let dir = unique_dir(target, &sanitize_folder_name(&title));
     fs::rename(staging, &dir).context("gagal memindahkan folder lagu")?;
@@ -401,10 +453,57 @@ fn run(
     Ok(ImportResult {
         dir,
         simfile,
-        analysis: Arc::new(analysis),
+        analysis: Some(Arc::new(analysis)),
         seed,
         used_ffmpeg,
         note,
+        elapsed: started.elapsed(),
+    })
+}
+
+/// An imported song made from the same file (same content hash), if any.
+fn find_existing(target: &Path, hash: u64, bytes: &[u8], ext: &str) -> Option<PathBuf> {
+    subdirs(target).into_iter().find(|dir| {
+        if find_simfile(dir).is_none() {
+            return false;
+        }
+        match read_source_hash(dir) {
+            Some(h) => h == hash,
+            // Imported before the marker existed: MP3/FLAC/... were copied as
+            // they are, so compare the audio file itself (size first: cheap).
+            None => {
+                let music = dir.join(format!("audio.{ext}"));
+                let same = fs::metadata(&music).is_ok_and(|m| m.len() == bytes.len() as u64)
+                    && fs::read(&music).is_ok_and(|b| b == bytes);
+                if same && let Err(e) = write_source_hash(dir, hash, bytes.len() as u64) {
+                    log::debug!("could not mark {}: {e}", dir.display());
+                }
+                same
+            }
+        }
+    })
+}
+
+/// An imported song with the same content fingerprint as `simfile`.
+fn find_same_song(target: &Path, simfile: &Simfile) -> Option<PathBuf> {
+    let print = fingerprint(simfile);
+    subdirs(target).into_iter().find(|dir| {
+        find_simfile(dir)
+            .and_then(|p| load_simfile(&p).ok())
+            .is_some_and(|s| fingerprint(&s) == print)
+    })
+}
+
+/// Result for a song that was imported before.
+fn reuse(dir: &Path, seed: u64, started: Instant) -> Option<ImportResult> {
+    let simfile = load_simfile(&find_simfile(dir)?).ok()?;
+    Some(ImportResult {
+        dir: dir.to_path_buf(),
+        simfile,
+        analysis: None,
+        seed,
+        used_ffmpeg: false,
+        note: None,
         elapsed: started.elapsed(),
     })
 }

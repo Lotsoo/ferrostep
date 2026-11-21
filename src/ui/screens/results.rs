@@ -2,13 +2,13 @@
 
 use std::time::Instant;
 
-use eframe::egui::{self, Align2, Color32, Pos2, Rect, Stroke, Ui, pos2, vec2};
+use eframe::egui::{self, Align2, Pos2, Rect, Stroke, Ui, pos2, vec2};
 
 use super::{Nav, ResultData, difficulty_color, difficulty_label};
 use crate::app::Shared;
 use crate::gameplay::judge::{Judgment, WINDOWS};
 use crate::input::{FrameInput, MenuAction};
-use crate::ui::theme::{self, ACCENT_B, font, font_bold, judgment_color};
+use crate::ui::theme::{self, font, font_bold, judgment_color};
 use crate::ui::{anim, widgets};
 
 pub struct ResultsScreen {
@@ -62,28 +62,25 @@ impl ResultsScreen {
         let grade = score.grade(self.data.no_fail);
         let appear = anim::progress(self.opened, now, 0.5, reduce);
         let scale = anim::ease_out_back(appear);
-        let grade_color = match grade {
-            "SS" | "S" => Color32::from_rgb(0xFF, 0xE4, 0x5C),
-            "A" => theme::SUCCESS,
-            "B" => ACCENT_B,
-            "F" => theme::DANGER,
-            _ => palette.text,
-        };
         let grade_pos = left.center_top() + vec2(0.0, left.height() * 0.32);
-        crate::ui::notefield::draw_glow(&painter, grade_pos, 90.0 * scale, grade_color, appear);
-        painter.text(
-            grade_pos,
-            Align2::CENTER_CENTER,
+        let size = 150.0 * scale.max(0.01);
+        crate::ui::hud::draw_grade_badge(
+            &painter,
+            Rect::from_center_size(grade_pos, vec2(size, size)),
             grade,
-            font_bold(120.0 * scale.max(0.01)),
-            grade_color,
+            (1.0 - appear) * 0.5,
+            ui.input(|i| i.time) as f32,
+            reduce,
         );
+        if !reduce {
+            ui.ctx().request_repaint();
+        }
 
         let count_up = anim::ease_out_cubic(anim::progress(self.opened, now, 1.2, reduce));
         let shown = score.percent() * f64::from(count_up);
         widgets::tabular_text(
             &painter,
-            grade_pos + vec2(0.0, 110.0),
+            grade_pos + vec2(0.0, 118.0),
             Align2::CENTER_CENTER,
             &format!("{shown:.2}%"),
             font_bold(theme::TEXT_XL + 8.0),
@@ -99,7 +96,7 @@ impl ResultsScreen {
                 (format!("Terbaik: {prev:.2}%"), palette.text_dim)
             };
             painter.text(
-                grade_pos + vec2(0.0, 150.0),
+                grade_pos + vec2(0.0, 156.0),
                 Align2::CENTER_CENTER,
                 text,
                 font(theme::TEXT_S),
