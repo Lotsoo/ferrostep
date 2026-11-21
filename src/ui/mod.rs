@@ -1,6 +1,7 @@
 //! Everything visual. Screens live in [`screens`].
 
 pub mod anim;
+pub mod beatfx;
 pub mod fonts;
 pub mod hud;
 pub mod notefield;

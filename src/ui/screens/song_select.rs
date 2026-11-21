@@ -14,7 +14,7 @@ use crate::library::scanner::SongEntry;
 use crate::library::scores::chart_key;
 use crate::parser::Difficulty;
 use crate::ui::theme::{self, ACCENT_B, font, font_bold};
-use crate::ui::{anim, widgets};
+use crate::ui::{anim, beatfx, widgets};
 
 /// Wait this long on a song before starting its preview.
 const PREVIEW_DELAY: f32 = 0.35;
@@ -26,6 +26,8 @@ struct Preview {
     dir: PathBuf,
     started: Instant,
     length: f32,
+    /// The song's timing, so menus can pulse on its beat.
+    map: crate::timing::TimingMap,
 }
 
 pub struct SongSelectScreen {
@@ -50,6 +52,8 @@ pub struct SongSelectScreen {
     list_ready: bool,
     focus_search: bool,
     tint: Color32,
+    /// Beat of the preview music (updated every frame).
+    beat: beatfx::Beat,
 }
 
 impl Default for SongSelectScreen {
@@ -70,6 +74,7 @@ impl Default for SongSelectScreen {
             drag_travel: 0.0,
             list_ready: false,
             focus_search: true,
+            beat: beatfx::Beat::idle(0.0),
             tint: theme::ACCENT_A,
         }
     }
@@ -192,6 +197,7 @@ impl SongSelectScreen {
                     dir: song.dir.clone(),
                     started: now,
                     length: length as f32,
+                    map: crate::timing::TimingMap::new(&song.simfile.timing),
                 })
             }
             Err(e) => log::warn!("preview failed: {e:#}"),
@@ -263,7 +269,21 @@ impl SongSelectScreen {
 
         let rect = ui.max_rect().shrink2(vec2(32.0, 24.0));
         let palette = shared.palette;
+        let reduce = shared.settings.reduce_motion;
+        self.beat = match &self.preview {
+            Some(p) if !p.music.is_stopped() => {
+                beatfx::Beat::from_music(&p.map, p.music.position())
+            }
+            _ => beatfx::Beat::idle(anim::since(shared.start, now)),
+        };
+        if reduce {
+            self.beat = self.beat.calm();
+        }
+        ui.ctx().request_repaint();
         widgets::background(ui.painter(), ui.max_rect(), &palette, 0.0, Some(self.tint));
+        if palette.dark {
+            beatfx::draw_highway(ui.painter(), ui.max_rect(), self.tint, &self.beat);
+        }
 
         // ── Header ──────────────────────────────────────────────
         let header = Rect::from_min_size(rect.min, vec2(rect.width(), 56.0));
@@ -510,16 +530,20 @@ impl SongSelectScreen {
             let r =
                 Rect::from_min_size(pos2(rect.left() + 6.0, y), vec2(rect.width() - 8.0, CARD_H));
             let color = widgets::color_from_hash(&song.title());
+            let pulse = self.beat.pulse;
             painter.rect_stroke(
                 r,
                 theme::RADIUS_CARD,
-                Stroke::new(1.5, color),
+                Stroke::new(
+                    1.5 + pulse,
+                    color.lerp_to_gamma(Color32::WHITE, 0.4 * pulse),
+                ),
                 StrokeKind::Inside,
             );
             painter.rect_stroke(
-                r.expand(3.0),
+                r.expand(3.0 + 3.0 * pulse),
                 theme::RADIUS_CARD + 3,
-                Stroke::new(3.0, color.gamma_multiply(0.18)),
+                Stroke::new(3.0 + 3.0 * pulse, color.gamma_multiply(0.18 + 0.3 * pulse)),
                 StrokeKind::Outside,
             );
             let bar = Rect::from_min_size(
@@ -707,12 +731,33 @@ impl SongSelectScreen {
             Stroke::new(10.0, palette.surface),
             StrokeKind::Outside,
         );
+        let beat = self.beat;
+        let eq = Rect::from_min_max(
+            pos2(
+                banner.left() + banner.width() * 0.42,
+                banner.top() + banner.height() * 0.3,
+            ),
+            banner.right_bottom() - vec2(16.0, 0.0),
+        );
+        beatfx::draw_equalizer(
+            &painter.with_clip_rect(banner),
+            eq,
+            (Color32::WHITE, color.lerp_to_gamma(Color32::WHITE, 0.5)),
+            &beat,
+        );
         crate::ui::notefield::draw_glow(
             &painter,
-            banner.right_bottom() - vec2(60.0, 50.0),
-            60.0,
+            banner.right_top() + vec2(-44.0, 40.0),
+            24.0 + 10.0 * beat.pulse,
             Color32::WHITE,
-            0.4,
+            0.3 + 0.4 * beat.pulse,
+        );
+        beatfx::draw_kick_ring(
+            &painter.with_clip_rect(banner),
+            banner.right_top() + vec2(-44.0, 40.0),
+            18.0,
+            Color32::WHITE,
+            &beat,
         );
         widgets::text_tracked(
             &painter,
@@ -770,13 +815,21 @@ impl SongSelectScreen {
                 font(theme::TEXT_XS),
                 palette.text_dim,
             );
-            painter.text(
+            let value_rect = painter.text(
                 pos2(x, y + 16.0),
                 Align2::LEFT_TOP,
                 truncate(value, 18),
                 font_bold(theme::TEXT_M),
                 palette.text,
             );
+            if i == 0 && beat.live {
+                beatfx::draw_metronome(
+                    &painter,
+                    pos2(value_rect.right() + 14.0, value_rect.center().y),
+                    color,
+                    &beat,
+                );
+            }
         }
         y += 64.0;
 
