@@ -3,7 +3,7 @@
 
 use std::time::Instant;
 
-use eframe::egui::{Align2, Rect, Stroke, Ui, pos2, vec2};
+use eframe::egui::{Align2, Color32, Painter, Pos2, Rect, Stroke, Ui, pos2, vec2};
 
 use crate::app::Shared;
 use crate::input::FrameInput;
@@ -154,6 +154,15 @@ impl Calibration {
         if flash > 0.0 {
             painter.circle_filled(center, 30.0, SUCCESS.gamma_multiply(flash));
         }
+
+        // Game-style feedback AFTER each tap (never a cue to follow).
+        draw_tap_strip(
+            &painter,
+            center + vec2(0.0, 176.0),
+            &self.taps,
+            self.last_flash.map(|t| anim::since(t, now)),
+            &palette,
+        );
 
         if let Some((mean, sd)) = self.result {
             let ms = mean * 1000.0;
@@ -316,5 +325,85 @@ mod tests {
         let (mean, sd) = robust_stats(&v).unwrap();
         assert!((mean - 0.020).abs() < 1e-9, "{mean}");
         assert!(sd < 1e-9);
+    }
+}
+
+/// Half-width of the strip in seconds (taps beyond are pinned to the edge).
+const STRIP_RANGE: f64 = 0.15;
+
+/// "early ← → late" strip: one dot per tap (newest brightest) and the latest
+/// tap's judgment word, like in gameplay.
+fn draw_tap_strip(
+    painter: &Painter,
+    center: Pos2,
+    taps: &[f64],
+    since_last: Option<f32>,
+    palette: &theme::Palette,
+) {
+    use crate::gameplay::judge::{Judgment, judge};
+    let half = 210.0;
+    let track = Rect::from_center_size(center, vec2(half * 2.0, 6.0));
+    // Judgment zones, widest first, so the middle shows the tightest color.
+    for (i, w) in crate::gameplay::judge::WINDOWS.iter().enumerate().rev() {
+        let x = (w / STRIP_RANGE).min(1.0) as f32 * half;
+        let j = Judgment::ALL[i];
+        painter.rect_filled(
+            Rect::from_center_size(center, vec2(x * 2.0, 6.0)),
+            3,
+            theme::judgment_color(j).gamma_multiply(0.25),
+        );
+    }
+    painter.line_segment(
+        [center - vec2(0.0, 12.0), center + vec2(0.0, 12.0)],
+        Stroke::new(2.0, palette.text),
+    );
+    painter.text(
+        track.left_bottom() + vec2(0.0, 14.0),
+        Align2::LEFT_TOP,
+        "cepat",
+        font(theme::TEXT_XS),
+        palette.text_dim,
+    );
+    painter.text(
+        track.right_bottom() + vec2(0.0, 14.0),
+        Align2::RIGHT_TOP,
+        "lambat",
+        font(theme::TEXT_XS),
+        palette.text_dim,
+    );
+    let n = taps.len();
+    for (k, d) in taps.iter().enumerate() {
+        let x = (d / STRIP_RANGE).clamp(-1.0, 1.0) as f32 * half;
+        let age = (n - 1 - k) as f32;
+        let color = judge(*d, 1.0).map_or(Color32::GRAY, theme::judgment_color);
+        let newest = k + 1 == n;
+        let pop = if newest {
+            since_last.map_or(0.0, |t| (1.0 - t / 0.25).max(0.0))
+        } else {
+            0.0
+        };
+        painter.circle_filled(
+            center + vec2(x, 0.0),
+            4.0 + 3.0 * pop + if newest { 1.5 } else { 0.0 },
+            color.gamma_multiply((1.0 - age * 0.06).max(0.25)),
+        );
+    }
+    // Latest judgment word pops above the strip.
+    if let (Some(d), Some(t)) = (taps.last(), since_last)
+        && t < 0.8
+    {
+        let alpha = (1.0 - (t - 0.5).max(0.0) / 0.3).clamp(0.0, 1.0);
+        let scale = 1.0 + 0.25 * (1.0 - (t / 0.15).min(1.0));
+        let (word, color) = judge(*d, 1.0).map_or(("Meleset", theme::DANGER), |j| {
+            (j.label(), theme::judgment_color(j))
+        });
+        widgets::text_tracked(
+            painter,
+            center - vec2(0.0, 30.0),
+            Align2::CENTER_CENTER,
+            word,
+            font_bold(theme::TEXT_M * scale),
+            color.gamma_multiply(alpha),
+        );
     }
 }

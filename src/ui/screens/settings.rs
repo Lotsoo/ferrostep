@@ -45,6 +45,28 @@ impl Category {
         }
     }
 
+    /// Accent per category, taken from the arrow colors (plus violet).
+    fn color(self) -> egui::Color32 {
+        match self {
+            Category::Gameplay => COLUMN_COLORS[0],
+            Category::Audio => COLUMN_COLORS[1],
+            Category::Display => COLUMN_COLORS[2],
+            Category::Controls => COLUMN_COLORS[3],
+            Category::Folders => theme::ACCENT_A,
+        }
+    }
+
+    /// Arrow direction drawn as the category icon (column index).
+    fn arrow(self) -> u8 {
+        match self {
+            Category::Gameplay => 0,
+            Category::Audio => 1,
+            Category::Display => 2,
+            Category::Controls => 3,
+            Category::Folders => 1,
+        }
+    }
+
     fn hint(self) -> &'static str {
         match self {
             Category::Gameplay => "Kecepatan, arah, tingkat penilaian",
@@ -116,6 +138,14 @@ impl SettingsScreen {
 
         let rect = ui.max_rect();
         let palette = shared.palette;
+        if palette.dark {
+            // Calm stage: the floor moves slowly, without flashes.
+            let beat = crate::ui::beatfx::Beat::idle(anim::since(shared.start, now)).calm();
+            crate::ui::beatfx::draw_highway(ui.painter(), rect, self.category.color(), &beat);
+            if !shared.settings.reduce_motion {
+                ui.ctx().request_repaint();
+            }
+        }
 
         // Calibration takes the whole content area.
         if let Some(cal) = &mut self.calibration {
@@ -228,22 +258,36 @@ impl SettingsScreen {
                 theme::RADIUS_BUTTON,
                 palette.surface_hover.gamma_multiply(t),
             );
+            let color = cat.color();
             if sel {
                 ui.painter().rect_filled(
                     Rect::from_min_size(r.min + vec2(0.0, 12.0), vec2(3.0, r.height() - 24.0)),
                     2,
-                    ACCENT_B,
+                    color,
                 );
             }
+            // Arrow icon in the category color (filled when selected).
+            let icon = r.left_center() + vec2(26.0, 0.0);
+            if sel {
+                notefield::draw_glow(ui.painter(), icon, 22.0, color, 0.5);
+            }
+            notefield::draw_arrow(
+                ui.painter(),
+                icon,
+                26.0,
+                cat.arrow(),
+                color.gamma_multiply(if sel { 1.0 } else { 0.25 + 0.3 * t }),
+                Stroke::new(1.2, color),
+            );
             ui.painter().text(
-                r.left_top() + vec2(16.0, 10.0),
+                r.left_top() + vec2(50.0, 10.0),
                 Align2::LEFT_TOP,
                 cat.label(),
                 font_bold(theme::TEXT_S + 1.0),
                 palette.text,
             );
             ui.painter().text(
-                r.left_top() + vec2(16.0, 32.0),
+                r.left_top() + vec2(50.0, 32.0),
                 Align2::LEFT_TOP,
                 cat.hint(),
                 font(theme::TEXT_XS),
@@ -254,6 +298,14 @@ impl SettingsScreen {
         // Content
         let content = Rect::from_min_max(pos2(side.right() + 24.0, body.top()), body.max);
         widgets::card(ui.painter(), content, &palette);
+        ui.painter().rect_filled(
+            Rect::from_min_size(
+                content.left_top() + vec2(24.0, 0.0),
+                vec2(content.width() - 48.0, 3.0),
+            ),
+            2,
+            self.category.color(),
+        );
         let mut nav = None;
         let mut child = ui.new_child(UiBuilder::new().max_rect(content.shrink(28.0)));
         egui::ScrollArea::vertical()
