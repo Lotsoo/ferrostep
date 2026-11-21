@@ -10,10 +10,12 @@ use eframe::egui::{self, Align2, Color32, Rect, Sense, Stroke, StrokeKind, Ui, p
 
 use super::{Nav, PlayRequest, difficulty_color, difficulty_label};
 use crate::app::Shared;
+use crate::audio::Music;
 use crate::importer::{ImportEvent, ImportJob, ImportResult, Stage, ffmpeg, is_importable};
 use crate::input::{FrameInput, MenuAction};
+use crate::timing::TimingMap;
 use crate::ui::theme::{self, ACCENT_A, ACCENT_B, DANGER, SUCCESS, font, font_bold};
-use crate::ui::{anim, widgets};
+use crate::ui::{anim, beatfx, widgets};
 
 /// Whether the window can receive dropped files on this platform.
 ///
@@ -58,6 +60,18 @@ pub struct ImportScreen {
     chart: usize,
     has_ffmpeg: bool,
     started: Instant,
+    /// The finished song playing as a preview, so the detected BPM can be
+    /// heard and seen pulsing together. Key = (folder, BPM) it was started for.
+    preview: Option<(Music, TimingMap, (PathBuf, u64))>,
+    beat: beatfx::Beat,
+}
+
+impl Drop for ImportScreen {
+    fn drop(&mut self) {
+        if let Some((m, _, _)) = &mut self.preview {
+            m.fade_out(400);
+        }
+    }
 }
 
 impl ImportScreen {
@@ -78,6 +92,8 @@ impl ImportScreen {
             chart: 1,
             has_ffmpeg: ffmpeg::find_ffmpeg(shared.settings.ffmpeg_path.as_deref()).is_some(),
             started: Instant::now(),
+            preview: None,
+            beat: beatfx::Beat::idle(0.0),
         };
         s.enqueue(files);
         s
@@ -273,6 +289,22 @@ impl ImportScreen {
         let rect = ui.max_rect();
         let palette = shared.palette;
         let painter = ui.painter().clone();
+        self.update_preview(shared);
+        let reduce = shared.settings.reduce_motion;
+        self.beat = match &self.preview {
+            Some((m, map, _)) if !m.is_stopped() => {
+                beatfx::Beat::from_music(map, m.position() - shared.settings.global_offset())
+            }
+            _ => beatfx::Beat::idle(anim::since(self.started, now)),
+        };
+        if reduce {
+            self.beat = self.beat.calm();
+        } else {
+            ctx.request_repaint();
+        }
+        if palette.dark {
+            beatfx::draw_highway(&painter, rect, ACCENT_A, &self.beat);
+        }
         let content = Rect::from_center_size(
             pos2(rect.center().x, rect.top() + rect.height() * 0.5 + 20.0),
             vec2(
@@ -304,7 +336,7 @@ impl ImportScreen {
         );
 
         let local = match &self.phase {
-            Phase::Idle => self.draw_idle(ui, shared, content, now),
+            Phase::Idle => self.draw_idle(ui, shared, content),
             Phase::Running => self.draw_running(ui, shared, content, now),
             Phase::Done(_) => self.draw_done(ui, shared, content),
             Phase::Failed(_) => self.draw_failed(ui, shared, content),
@@ -314,6 +346,45 @@ impl ImportScreen {
     }
 
     /// Stops the running import and drops the queue (app is closing).
+    /// Plays the finished song (single imports) and restarts it when the
+    /// BPM is corrected, so the pulse always matches the current timing.
+    fn update_preview(&mut self, shared: &mut Shared) {
+        let wanted = match &self.phase {
+            Phase::Done(r) if !self.is_batch() => Some(r),
+            _ => None,
+        };
+        let Some(result) = wanted else {
+            if let Some((mut m, _, _)) = self.preview.take() {
+                m.fade_out(400);
+            }
+            return;
+        };
+        let key = (result.dir.clone(), result.bpm().to_bits());
+        if self.preview.as_ref().is_some_and(|(_, _, k)| *k == key) {
+            return;
+        }
+        let meta = &result.simfile.meta;
+        let path = result.dir.join(&meta.music);
+        let start = self
+            .preview
+            .take()
+            .map(|(mut m, _, _)| {
+                let pos = m.position();
+                m.fade_out(150);
+                pos
+            })
+            .unwrap_or(meta.sample_start.max(0.0));
+        let Some(audio) = shared.audio.as_mut() else {
+            return;
+        };
+        match audio.play_music(&path, start, 600) {
+            Ok(music) => {
+                self.preview = Some((music, TimingMap::new(&result.simfile.timing), key));
+            }
+            Err(e) => log::warn!("import preview: {e:#}"),
+        }
+    }
+
     pub fn cancel_all(&mut self) {
         self.cancel();
     }
@@ -325,7 +396,7 @@ impl ImportScreen {
         self.queue.clear();
     }
 
-    fn draw_idle(&mut self, ui: &mut Ui, shared: &Shared, area: Rect, now: Instant) -> Option<Nav> {
+    fn draw_idle(&mut self, ui: &mut Ui, shared: &Shared, area: Rect) -> Option<Nav> {
         let palette = shared.palette;
         let zone = Rect::from_min_size(area.min, vec2(area.width(), area.height() * 0.72));
         let response = ui.interact(zone, ui.scope_id().with("drop-zone"), Sense::click());
@@ -348,31 +419,60 @@ impl ImportScreen {
                 .gamma_multiply(0.7),
         );
 
-        // Icon: tray with a bouncing arrow.
-        let t = if shared.settings.reduce_motion {
-            0.0
-        } else {
-            anim::since(self.started, now)
-        };
-        let bob = (t * 3.0).sin() * 4.0 * (0.4 + hot);
-        let c = zone.center() - vec2(0.0, 50.0);
-        let color = ACCENT_A.lerp_to_gamma(ACCENT_B, 0.5 + 0.5 * hot);
-        let stroke = Stroke::new(4.0, color);
-        painter.line_segment(
-            [c + vec2(0.0, -30.0 + bob), c + vec2(0.0, 6.0 + bob)],
-            stroke,
+        // Icon: four arrows falling onto a row of targets, one per beat.
+        let beat = self.beat;
+        let c = zone.center() - vec2(0.0, 56.0);
+        let fall = 70.0;
+        for col in 0..4u8 {
+            let x = c.x + (f32::from(col) - 1.5) * 52.0;
+            let target = pos2(x, c.y + 24.0);
+            let color = theme::column_color(col);
+            // Arrow `col` lands on beat ≡ col (mod 4), so they chase in turn.
+            let since = (beat.beat - f64::from(col)).rem_euclid(4.0) as f32;
+            let landed = since < 1.0;
+            let flash = if landed {
+                (1.0 - since).powi(3) * if beat.live { 1.0 } else { 0.6 }
+            } else {
+                0.0
+            };
+            if flash > 0.0 {
+                crate::ui::notefield::radial_light(painter, target, 46.0, color, 0.8 * flash);
+            }
+            crate::ui::notefield::draw_arrow(
+                painter,
+                target,
+                40.0,
+                col,
+                color.gamma_multiply(0.12 + 0.6 * flash),
+                Stroke::new(1.5, color.gamma_multiply(0.5 + 0.5 * hot)),
+            );
+            if !shared.settings.reduce_motion {
+                // Falling during the beat before it lands.
+                let to_land = 4.0 - since; // beats until next landing
+                if to_land < 1.0 || (hot > 0.5 && to_land < 2.0) {
+                    let p = 1.0 - to_land.min(1.0);
+                    let pos = target - vec2(0.0, fall * (1.0 - p));
+                    crate::ui::notefield::draw_arrow(
+                        painter,
+                        pos,
+                        34.0,
+                        col,
+                        color.gamma_multiply(0.3 + 0.7 * p),
+                        Stroke::new(1.0, Color32::WHITE.gamma_multiply(0.6 * p)),
+                    );
+                }
+            }
+        }
+        // Neon frame that breathes with the beat (stronger while dragging).
+        painter.rect_stroke(
+            zone.shrink(10.0),
+            theme::RADIUS_CARD,
+            Stroke::new(
+                1.5 + 2.0 * hot,
+                ACCENT_B.gamma_multiply((0.12 + 0.3 * hot) * (0.5 + 0.5 * beat.pulse)),
+            ),
+            StrokeKind::Inside,
         );
-        painter.line_segment(
-            [c + vec2(-14.0, -8.0 + bob), c + vec2(0.0, 6.0 + bob)],
-            stroke,
-        );
-        painter.line_segment(
-            [c + vec2(14.0, -8.0 + bob), c + vec2(0.0, 6.0 + bob)],
-            stroke,
-        );
-        painter.line_segment([c + vec2(-34.0, 10.0), c + vec2(-34.0, 26.0)], stroke);
-        painter.line_segment([c + vec2(-34.0, 26.0), c + vec2(34.0, 26.0)], stroke);
-        painter.line_segment([c + vec2(34.0, 26.0), c + vec2(34.0, 10.0)], stroke);
         if !shared.settings.reduce_motion {
             ui.ctx().request_repaint();
         }
@@ -580,6 +680,21 @@ impl ImportScreen {
             pos2(inner.right(), inner.bottom() - 70.0),
         );
         draw_waveform(&painter, wave, &self.waveform, overall, &palette);
+        if !self.waveform.is_empty() && !shared.settings.reduce_motion {
+            // Glowing scanner at the analysis position.
+            let x = wave.left() + wave.width() * overall.clamp(0.0, 1.0);
+            crate::ui::notefield::radial_light(
+                &painter,
+                pos2(x, wave.center().y),
+                wave.height() * 0.6,
+                ACCENT_B,
+                0.5 + 0.3 * self.beat.pulse,
+            );
+            painter.line_segment(
+                [pos2(x, wave.top()), pos2(x, wave.bottom())],
+                Stroke::new(2.0, Color32::WHITE.gamma_multiply(0.85)),
+            );
+        }
 
         let cancel = Rect::from_center_size(
             pos2(inner.center().x, inner.bottom() - 22.0),
@@ -648,6 +763,16 @@ impl ImportScreen {
         );
         let bpm = result.bpm();
         let mut x = row.left() + 130.0;
+        let beat = self.beat;
+        if beat.live {
+            crate::ui::notefield::radial_light(
+                &painter,
+                pos2(x + 40.0, row.center().y),
+                60.0,
+                ACCENT_B,
+                0.5 * beat.pulse,
+            );
+        }
         widgets::tabular_text(
             &painter,
             pos2(x, row.center().y),
@@ -690,10 +815,18 @@ impl ImportScreen {
                 _ => shared.toasts.warning("Masukkan BPM antara 30 dan 400."),
             }
         }
+        if beat.live {
+            beatfx::draw_metronome(
+                &painter,
+                pos2(apply.right() + 24.0, row.center().y),
+                ACCENT_B,
+                &beat,
+            );
+        }
         painter.text(
             pos2(row.left(), row.bottom() + 8.0),
             Align2::LEFT_TOP,
-            "Panah terasa terlalu rapat atau jarang? Coba ÷2 atau ×2. Chart dibuat ulang otomatis.",
+            "Dengarkan lagunya: titik harus berkedip pas di ketukan. Terlalu rapat atau jarang? Coba ÷2 atau ×2.",
             font(theme::TEXT_XS + 1.0),
             palette.text_dim,
         );
@@ -779,6 +912,16 @@ impl ImportScreen {
                 font(theme::TEXT_XS + 1.0),
                 palette.text_dim,
             );
+        }
+
+        // Live equalizer in the free space, dancing to the preview.
+        let eq_top = cards_top + if result.note.is_some() { 140.0 } else { 116.0 };
+        let eq = Rect::from_min_max(
+            pos2(inner.left(), eq_top),
+            pos2(inner.right(), inner.bottom() - 72.0),
+        );
+        if eq.height() > 24.0 {
+            beatfx::draw_equalizer(&painter, eq, (ACCENT_A, ACCENT_B), &beat);
         }
 
         // Actions
