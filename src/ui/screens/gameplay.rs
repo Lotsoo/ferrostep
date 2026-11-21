@@ -38,6 +38,10 @@ pub struct GameplayScreen {
     music_path: PathBuf,
     title: String,
     subtitle: String,
+    /// "3, 2, 1" after unpausing: music waits until it ends (start time).
+    resuming: Option<Instant>,
+    /// Last resume-count number that beeped.
+    resume_beeped: i32,
     session: GameSession,
     timing: TimingMap,
     columns: u8,
@@ -84,6 +88,8 @@ impl GameplayScreen {
         let session = GameSession::new(notes, columns, settings.judge_scale);
         let song_length = session.end_time;
         Ok(Self {
+            resuming: None,
+            resume_beeped: 4,
             title: sim.meta.title.clone(),
             subtitle: {
                 let level = format!("{} {}", difficulty_label(chart.difficulty), chart.meter);
@@ -148,12 +154,31 @@ impl GameplayScreen {
 
     fn set_paused(&mut self, paused: bool, now: Instant) {
         if paused && self.pause.is_none() {
+            // Any pause cancels a running resume countdown (it restarts later).
+            self.resuming = None;
             self.pause = Some(Pause { selected: 0 });
             if let Some(m) = &mut self.music {
                 m.pause();
             }
         } else if !paused && self.pause.is_some() {
             self.pause = None;
+            if matches!(self.phase, Phase::Playing { .. }) && self.resuming.is_none() {
+                // Give the player 3 seconds to get ready again.
+                self.resuming = Some(now);
+                self.resume_beeped = 4;
+                return;
+            }
+            self.resume_now(now);
+        }
+    }
+
+    /// Length of the "3, 2, 1" after unpausing.
+    const RESUME_COUNT: f32 = 3.0;
+
+    /// Actually continues the music and the clock.
+    fn resume_now(&mut self, now: Instant) {
+        self.resuming = None;
+        {
             if let Some(m) = &mut self.music {
                 m.resume();
             }
@@ -269,6 +294,22 @@ impl GameplayScreen {
             return Some(nav);
         }
 
+        if let Some(start) = self.resuming
+            && self.pause.is_none()
+        {
+            let elapsed = anim::since(start, now);
+            let n = (Self::RESUME_COUNT - elapsed).ceil() as i32;
+            if n < self.resume_beeped && n > 0 {
+                self.resume_beeped = n;
+                shared.sfx(crate::audio::Sfx::Count);
+            }
+            if elapsed >= Self::RESUME_COUNT {
+                self.resume_now(now);
+            } else {
+                self.draw(ui, shared, now);
+                return None;
+            }
+        }
         if self.pause.is_none() {
             match self.update_clock(shared, now) {
                 Ok(t) => self.song_time = t,
@@ -411,7 +452,24 @@ impl GameplayScreen {
             self.set_paused(true, now);
         }
 
-        if self.song_time < 1.0 && self.pause.is_none() {
+        if let Some(start) = self.resuming
+            && self.pause.is_none()
+        {
+            painter.rect_filled(rect, 0, Color32::from_black_alpha(110));
+            let t = f64::from(anim::since(start, now) - Self::RESUME_COUNT);
+            hud::draw_countdown(
+                &painter,
+                rect,
+                t.min(-0.001),
+                &hud::CountdownInfo {
+                    title: &self.title,
+                    subtitle: &self.subtitle,
+                    tint: self.tint,
+                },
+                reduce,
+            );
+            ui.ctx().request_repaint();
+        } else if self.song_time < 1.0 && self.pause.is_none() {
             hud::draw_countdown(
                 &painter,
                 rect,
@@ -661,22 +719,87 @@ impl GameplayScreen {
         let painter = ui.painter().clone();
         painter.rect_filled(rect, 0, Color32::from_black_alpha(170));
         let palette = shared.palette;
-        let card = Rect::from_center_size(rect.center(), vec2(380.0, 300.0));
+        let card = Rect::from_center_size(rect.center(), vec2(420.0, 470.0));
+        crate::ui::notefield::radial_light(&painter, card.center(), 420.0, self.tint, 0.25);
         widgets::card(&painter, card, &palette);
+        // Four column colors across the top: this is a rhythm game.
+        let stripe_w = (card.width() - 48.0) / 4.0;
+        for c in 0..4u8 {
+            let r = Rect::from_min_size(
+                card.left_top() + vec2(24.0 + f32::from(c) * stripe_w, 0.0),
+                vec2(stripe_w - 6.0, 4.0),
+            );
+            painter.rect_filled(r, 2, theme::column_color(c));
+        }
         widgets::text_tracked(
             &painter,
             card.center_top() + vec2(0.0, 40.0),
             Align2::CENTER_CENTER,
-            "Dijeda",
+            "D I J E D A",
             font_bold(theme::TEXT_L),
             palette.text,
         );
+        painter.text(
+            card.center_top() + vec2(0.0, 74.0),
+            Align2::CENTER_CENTER,
+            super::song_select::truncate(&self.title, 34),
+            font_bold(theme::TEXT_M),
+            palette.text,
+        );
+        painter.text(
+            card.center_top() + vec2(0.0, 98.0),
+            Align2::CENTER_CENTER,
+            &self.subtitle,
+            font(theme::TEXT_S),
+            self.difficulty_color,
+        );
+        // Song progress + live stats.
+        let progress = (self.song_time / self.song_length.max(0.001)).clamp(0.0, 1.0) as f32;
+        let bar = Rect::from_min_size(
+            card.left_top() + vec2(40.0, 124.0),
+            vec2(card.width() - 80.0, 6.0),
+        );
+        painter.rect_filled(bar, 3, palette.border);
+        widgets::gradient_pill(
+            &painter,
+            Rect::from_min_size(
+                bar.min,
+                vec2((bar.width() * progress).max(6.0), bar.height()),
+            ),
+            theme::ACCENT_A,
+            theme::ACCENT_B,
+        );
+        let score = &self.session.score;
+        let stats = [
+            ("Progres", format!("{:.0}%", progress * 100.0)),
+            ("Akurasi", format!("{:.2}%", score.accuracy_percent())),
+            ("Combo", score.combo.to_string()),
+        ];
+        let col_w = bar.width() / 3.0;
+        for (i, (label, value)) in stats.iter().enumerate() {
+            let x = bar.left() + col_w * (i as f32 + 0.5);
+            painter.text(
+                pos2(x, bar.bottom() + 14.0),
+                Align2::CENTER_TOP,
+                *label,
+                font(theme::TEXT_XS),
+                palette.text_dim,
+            );
+            widgets::tabular_text(
+                &painter,
+                pos2(x, bar.bottom() + 32.0),
+                Align2::CENTER_TOP,
+                value,
+                font_bold(theme::TEXT_M),
+                palette.text,
+            );
+        }
 
         let mut clicked = None;
         let selected = self.pause.as_ref().map_or(0, |p| p.selected);
         for (i, label) in PAUSE_ITEMS.iter().enumerate() {
             let r = Rect::from_center_size(
-                card.center_top() + vec2(0.0, 100.0 + i as f32 * 60.0),
+                card.center_top() + vec2(0.0, 250.0 + i as f32 * 60.0),
                 vec2(300.0, 48.0),
             );
             let resp = ui.put(r, |ui: &mut Ui| {
