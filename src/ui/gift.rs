@@ -37,6 +37,9 @@ include!(concat!(env!("OUT_DIR"), "/gift_media.rs"));
 
 /// Pause before a video starts (lets the card appear first).
 const LEAD_IN: f32 = 0.6;
+/// The audio position not moving for this long (seconds) means the audio
+/// device is stuck; the video then keeps going on the system clock.
+const AUDIO_STALL: f32 = 0.5;
 /// Pause on the last frame before the next video.
 const HOLD_END: f32 = 1.0;
 
@@ -163,6 +166,11 @@ pub struct Greetings {
     video_since: Instant,
     music: Option<Music>,
     clock: Option<AudioClock>,
+    /// Last raw audio position and when it last changed.
+    last_raw: (f64, Instant),
+    /// The audio stopped advancing: the video continues on the system clock
+    /// from (when, video time then), so a stuck audio device never freezes it.
+    fallback: Option<(Instant, f64)>,
     texture: Option<TextureHandle>,
     decoder: FrameDecoder,
     ended_at: Option<Instant>,
@@ -185,6 +193,8 @@ impl Greetings {
             video_since: now,
             music: None,
             clock: None,
+            last_raw: (0.0, now),
+            fallback: None,
             texture: None,
             ended_at: None,
             opened: now,
@@ -199,8 +209,24 @@ impl Greetings {
 
     /// Current playback time of the video in seconds (before start: <= 0).
     fn time(&mut self, now: Instant) -> f64 {
+        if let Some((at, base)) = self.fallback {
+            return base + f64::from(anim::since(at, now));
+        }
         match (&self.music, &mut self.clock) {
-            (Some(music), Some(clock)) => clock.update(music.position(), now),
+            (Some(music), Some(clock)) => {
+                let raw = music.position();
+                if raw != self.last_raw.0 {
+                    self.last_raw = (raw, now);
+                }
+                let t = clock.update(raw, now);
+                if !music.is_stopped() && anim::since(self.last_raw.1, now) > AUDIO_STALL {
+                    log::warn!(
+                        "greeting audio stalled at {t:.2} s; video continues on the system clock"
+                    );
+                    self.fallback = Some((now, t));
+                }
+                t
+            }
             _ => f64::from(anim::since(self.video_since, now) - LEAD_IN),
         }
     }
@@ -224,6 +250,7 @@ impl Greetings {
             match audio.play_bytes(sound, false, 0) {
                 Ok(music) => {
                     self.clock = Some(AudioClock::new(music.position(), now));
+                    self.last_raw = (music.position(), now);
                     self.music = Some(music);
                 }
                 Err(e) => log::warn!("gift video audio: {e:#}"),
@@ -249,6 +276,7 @@ impl Greetings {
             self.video_since = now;
             self.music = None;
             self.clock = None;
+            self.fallback = None;
             self.decoder = FrameDecoder::start(self.videos[self.index].1);
             self.ended_at = None;
         }
