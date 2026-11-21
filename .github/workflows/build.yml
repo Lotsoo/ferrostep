@@ -110,7 +110,7 @@ jobs:
         run: |
           choco install nsis -y --no-progress
           $version = (Select-String -Path Cargo.toml -Pattern '^version = "(.+)"').Matches[0].Groups[1].Value
-          & "${env:ProgramFiles(x86)}\NSIS\makensis.exe" -V2 "-DVERSION=$version" "-DEXE=../../target/release/ferrostep.exe" packaging/windows/ferrostep.nsi
+          & "${env:ProgramFiles(x86)}\NSIS\makensis.exe" -V2 "-DVERSION=$version" "-DEXE=..\..\target\release\ferrostep.exe" packaging/windows/ferrostep.nsi
       - name: Upload unsigned installer
         if: steps.signing.outputs.enabled == 'true'
         id: unsigned-installer
