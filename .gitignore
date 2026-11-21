@@ -6,3 +6,6 @@ catatan.txt
 
 # Song library (user content, never committed)
 /Songs/
+
+# Built installers / packages
+/dist/

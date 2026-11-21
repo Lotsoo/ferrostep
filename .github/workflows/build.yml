@@ -42,7 +42,7 @@ jobs:
           path: target/generate-rpm/*.rpm
 
   windows:
-    name: Windows (zip)
+    name: Windows (zip + installer)
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -68,6 +68,16 @@ jobs:
         with:
           name: ferrostep-windows-zip
           path: dist/Ferrostep-windows-x86_64.zip
+      - name: Build installer (NSIS)
+        shell: pwsh
+        run: |
+          choco install nsis -y --no-progress
+          $version = (Select-String -Path Cargo.toml -Pattern '^version = "(.+)"').Matches[0].Groups[1].Value
+          & "${env:ProgramFiles(x86)}\NSIS\makensis.exe" -V2 "-DVERSION=$version" "-DEXE=../../target/release/ferrostep.exe" packaging/windows/ferrostep.nsi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ferrostep-windows-installer
+          path: dist/Ferrostep-Setup-*.exe
 
   release:
     name: GitHub release

@@ -46,6 +46,9 @@ lto = "thin"
 codegen-units = 4
 strip = "debuginfo"
 
+[build-dependencies]
+winresource = "0.1.34"
+
 # Fedora RPM via `cargo generate-rpm` (after `cargo build --release`).
 [package.metadata.generate-rpm]
 summary = "Modern 4-panel rhythm game for keyboard and USB dance mats"
