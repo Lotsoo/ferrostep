@@ -9,3 +9,6 @@ catatan.txt
 
 # Built installers / packages
 /dist/
+
+# Personal gift letter: only in builds made on this machine, never on GitHub
+/private/

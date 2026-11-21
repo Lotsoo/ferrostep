@@ -115,6 +115,8 @@ struct QuitDialog {
 }
 
 pub struct FerrostepApp {
+    /// Welcome letter shown on every start (private builds only); blocks everything else.
+    letter: Option<crate::ui::letter::Letter>,
     quit_dialog: Option<QuitDialog>,
     /// Set once the player confirmed; the next close request goes through.
     allow_close: bool,
@@ -208,6 +210,7 @@ impl FerrostepApp {
             transition_start: now,
             transition: anim::Spring::new(1.0, anim::Spring::SMOOTH),
             last_hover: None,
+            letter: None,
             quit_dialog: None,
             allow_close: false,
             transition_dir: 1.0,
@@ -215,6 +218,7 @@ impl FerrostepApp {
             fps_since: now,
             fps_work: 0.0,
         };
+        app.letter = crate::ui::letter::Letter::new(now);
         if !launch.import.is_empty() {
             app.navigate(Nav::Import(launch.import.clone()));
         }
@@ -609,10 +613,15 @@ impl eframe::App for FerrostepApp {
         // Closing the window asks first (an accidental click must not lose a play).
         if ctx.input(|i| i.viewport().close_requested()) && !self.allow_close {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
-            self.open_quit_dialog();
+            // The welcome letter must be read to the end before anything else.
+            if let Some(letter) = &mut self.letter {
+                letter.nudge(input.now);
+            } else {
+                self.open_quit_dialog();
+            }
         }
         // While the dialog is open, screens get no keys or steps.
-        let screen_input = if self.quit_dialog.is_some() {
+        let screen_input = if self.quit_dialog.is_some() || self.letter.is_some() {
             let mut quiet = input.clone();
             quiet.menu.clear();
             quiet.columns.clear();
@@ -671,6 +680,14 @@ impl eframe::App for FerrostepApp {
             ctx.request_repaint();
         }
 
+        if let Some(letter) = &mut self.letter {
+            let palette = self.shared.palette;
+            let reduce = self.shared.settings.reduce_motion;
+            if letter.ui(&ctx, &palette, &input, reduce) {
+                self.letter = None;
+                self.shared.sfx(Sfx::Success);
+            }
+        }
         self.quit_dialog_ui(&ctx, &input);
         pointer_cursor(&ctx);
         self.menu_sounds(&ctx, &input);
