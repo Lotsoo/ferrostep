@@ -441,24 +441,22 @@ impl Greetings {
             font_bold(36.0),
             fade(accent.lerp_to_gamma(Color32::WHITE, 0.25)),
         );
-        for i in 0..n {
-            let x = rect.right() - 32.0 - (n - 1 - i) as f32 * 22.0;
-            let y = rect.top() + 38.0;
-            let color = if i <= self.index {
-                column_color((i % 4) as u8)
-            } else {
-                palette.text_dim.gamma_multiply(0.4)
-            };
-            if i == self.index {
-                painter.rect_filled(
-                    Rect::from_center_size(pos2(x - 7.0, y), vec2(22.0, 8.0)),
-                    4,
-                    color,
-                );
-            } else {
-                painter.circle_filled(pos2(x, y), 4.0, color.gamma_multiply(0.7));
-            }
-        }
+        widgets::page_dots(
+            &painter,
+            pos2(rect.right() - 32.0, rect.top() + 38.0),
+            egui::Align::Max,
+            n,
+            self.index,
+            self.index.checked_sub(1),
+            slide,
+            |i| {
+                if i <= self.index {
+                    column_color((i % 4) as u8)
+                } else {
+                    palette.text_dim.gamma_multiply(0.4)
+                }
+            },
+        );
 
         // The video itself.
         let video = Rect::from_min_size(

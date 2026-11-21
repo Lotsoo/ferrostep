@@ -799,3 +799,48 @@ pub fn slider(
     }
     resp
 }
+
+/// Page indicator: evenly spaced dots, the current one stretched into a pill.
+/// The stretch moves from `previous` to `current` as `progress` goes 0 → 1,
+/// and the row keeps its spacing, so dots never overlap. `anchor` is the
+/// vertical center and the left, center or right end of the row (`align`).
+#[allow(clippy::too_many_arguments)]
+pub fn page_dots(
+    painter: &Painter,
+    anchor: Pos2,
+    align: egui::Align,
+    count: usize,
+    current: usize,
+    previous: Option<usize>,
+    progress: f32,
+    color: impl Fn(usize) -> Color32,
+) {
+    const DOT: f32 = 8.0;
+    const PILL: f32 = 24.0;
+    const GAP: f32 = 8.0;
+    let p = progress.clamp(0.0, 1.0);
+    let stretch = |i: usize| {
+        if i == current {
+            p
+        } else if Some(i) == previous {
+            1.0 - p
+        } else {
+            0.0
+        }
+    };
+    let widths: Vec<f32> = (0..count)
+        .map(|i| DOT + (PILL - DOT) * stretch(i))
+        .collect();
+    let total = widths.iter().sum::<f32>() + GAP * count.saturating_sub(1) as f32;
+    let mut x = match align {
+        egui::Align::Min => anchor.x,
+        egui::Align::Center => anchor.x - total / 2.0,
+        egui::Align::Max => anchor.x - total,
+    };
+    for (i, w) in widths.iter().enumerate() {
+        let r = Rect::from_min_size(pos2(x, anchor.y - DOT / 2.0), vec2(*w, DOT));
+        let c = color(i);
+        painter.rect_filled(r, DOT / 2.0, c.gamma_multiply(0.6 + 0.4 * stretch(i)));
+        x += w + GAP;
+    }
+}

@@ -99,6 +99,8 @@ pub struct Letter {
     /// Highest page index shown so far (earlier pages need no waiting).
     furthest: usize,
     page_since: Instant,
+    /// Page shown before the current one (the dot indicator animates from it).
+    prev_page: Option<usize>,
     /// Direction of the last page change (+1 next, −1 back) for the slide.
     dir: f32,
     opened: Instant,
@@ -115,6 +117,7 @@ impl Letter {
             page: 0,
             furthest: 0,
             page_since: now,
+            prev_page: None,
             dir: 1.0,
             opened: now,
             nudged: None,
@@ -135,6 +138,7 @@ impl Letter {
 
     fn go(&mut self, to: usize, now: Instant) {
         self.dir = if to > self.page { 1.0 } else { -1.0 };
+        self.prev_page = Some(self.page);
         self.page = to;
         if to > self.furthest {
             self.furthest = to;
@@ -233,26 +237,23 @@ impl Letter {
         }
 
         // Page dots.
-        let n = self.pages.len();
-        let dots_y = rect.top() + 36.0;
-        for i in 0..n {
-            let x = rect.center().x + (i as f32 - (n as f32 - 1.0) / 2.0) * 22.0;
-            let active = i == self.page;
-            let color = if i <= self.furthest {
-                column_color((i % 4) as u8)
-            } else {
-                palette.text_dim.gamma_multiply(0.4)
-            };
-            if active {
-                painter.rect_filled(
-                    Rect::from_center_size(pos2(x, dots_y), vec2(22.0, 8.0)),
-                    4,
-                    color,
-                );
-            } else {
-                painter.circle_filled(pos2(x, dots_y), 4.0, color.gamma_multiply(0.7));
-            }
-        }
+        let furthest = self.furthest;
+        widgets::page_dots(
+            &painter,
+            pos2(rect.center().x, rect.top() + 36.0),
+            egui::Align::Center,
+            self.pages.len(),
+            self.page,
+            self.prev_page,
+            anim::ease_out_cubic(anim::progress(self.page_since, now, 0.3, reduce)),
+            |i| {
+                if i <= furthest {
+                    column_color((i % 4) as u8)
+                } else {
+                    palette.text_dim.gamma_multiply(0.4)
+                }
+            },
+        );
 
         // Page content slides in from the side it came from.
         let slide = if reduce {
