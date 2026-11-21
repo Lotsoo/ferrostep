@@ -19,9 +19,9 @@ use eframe::egui::{
     vec2,
 };
 
-use super::theme::{self, ACCENT_A, ACCENT_B, Palette, column_color, font_bold};
-use super::{anim, notefield, widgets};
 use crate::input::{FrameInput, MenuAction};
+use crate::ui::theme::{self, ACCENT_A, ACCENT_B, Palette, column_color, font_bold};
+use crate::ui::{anim, notefield, widgets};
 
 const RAW: &str = include_str!(concat!(env!("OUT_DIR"), "/letter.txt"));
 

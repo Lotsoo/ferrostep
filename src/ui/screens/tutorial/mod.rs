@@ -5,8 +5,11 @@ use eframe::egui::{Rect, Ui, pos2, vec2};
 use super::Nav;
 use crate::app::Shared;
 use crate::input::{FrameInput, MenuAction};
-use crate::ui::tutorial::{Tutorial, TutorialEvent};
 use crate::ui::{anim, beatfx, theme, widgets};
+use course::{Tutorial, TutorialEvent};
+
+pub mod course;
+mod lessons;
 
 pub struct TutorialScreen {
     tutorial: Tutorial,

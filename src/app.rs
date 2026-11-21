@@ -119,7 +119,7 @@ struct QuitDialog {
 
 pub struct FerrostepApp {
     /// Welcome letter shown on every start (private builds only); blocks everything else.
-    letter: Option<crate::ui::letter::Letter>,
+    letter: Option<crate::ui::gift::letter::Letter>,
     /// Looping trumpet that plays while the letter is open.
     letter_music: Option<crate::audio::Music>,
     /// Greeting videos after the letter (private builds only); unskippable.
@@ -231,7 +231,7 @@ impl FerrostepApp {
             fps_since: now,
             fps_work: 0.0,
         };
-        app.letter = crate::ui::letter::Letter::new(now);
+        app.letter = crate::ui::gift::letter::Letter::new(now);
         if app.letter.is_some()
             && let (Some(trumpet), Some(audio)) = (crate::ui::gift::TRUMPET, &mut app.shared.audio)
         {

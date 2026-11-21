@@ -5,11 +5,9 @@ pub mod beatfx;
 pub mod fonts;
 pub mod gift;
 pub mod hud;
-pub mod letter;
 pub mod notefield;
 pub mod screens;
 pub mod theme;
-pub mod tutorial;
 pub mod widgets;
 
 use std::time::Instant;

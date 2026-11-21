@@ -17,7 +17,7 @@ const STEP_TITLES: [&str; 4] = ["Kontrol", "Tutorial", "Sinkronisasi", "Mulai ma
 pub struct OnboardingScreen {
     step: usize,
     calibration: Option<Calibration>,
-    tutorial: Option<crate::ui::tutorial::Tutorial>,
+    tutorial: Option<super::tutorial::course::Tutorial>,
     lit: [Option<Instant>; 4],
     step_started: Instant,
 }
@@ -307,7 +307,7 @@ impl OnboardingScreen {
         }
         let tutorial = self
             .tutorial
-            .get_or_insert_with(|| crate::ui::tutorial::Tutorial::new(true));
+            .get_or_insert_with(|| super::tutorial::course::Tutorial::new(true));
         if tutorial.ui(ui, area, shared, input).is_some() {
             self.next();
         }

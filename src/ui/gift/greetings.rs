@@ -1,176 +1,18 @@
-//! Birthday greeting videos shown after the welcome letter (private builds only).
-//!
-//! `build.rs` converts `private/video/*.mp4` into JPEG frame packs plus Ogg
-//! audio and embeds them; public builds embed nothing and never show this.
-//! The videos play one after another in a card with no controls at all: no
-//! skip, no pause, no seeking, and the window cannot be closed meanwhile.
+//! The greeting video card: plays the videos one after another with no controls.
 
-use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::time::Instant;
-
-use crossbeam_channel::Receiver;
-
-use eframe::egui::{
-    self, Align2, Color32, ColorImage, Rect, Sense, TextureHandle, TextureOptions, Ui, pos2, vec2,
-};
-use zune_core::bytestream::ZCursor;
-use zune_core::colorspace::ColorSpace;
-use zune_core::options::DecoderOptions;
-use zune_jpeg::JpegDecoder;
-
-use super::theme::{self, ACCENT_A, ACCENT_B, Palette, column_color, font, font_bold};
-use super::{anim, letter, notefield, widgets};
-use crate::audio::{Audio, AudioClock, Music};
-
-/// One embedded greeting video.
-pub struct GiftVideo {
-    /// Shown as "Ucapan dari <name>".
-    pub name: &'static str,
-    /// Frame pack written by `build.rs` (`FSV1` format).
-    pub frames: &'static [u8],
-    /// Ogg Vorbis soundtrack.
-    pub audio: &'static [u8],
-}
-
-include!(concat!(env!("OUT_DIR"), "/gift_media.rs"));
+use super::decoder::{FrameDecoder, FramePack, decode_jpeg};
+use super::*;
 
 /// Pause before a video starts (lets the card appear first).
-const LEAD_IN: f32 = 0.6;
+pub(super) const LEAD_IN: f32 = 0.6;
 /// The audio position not moving for this long (seconds) means the audio
 /// device is stuck; the video then keeps going on the system clock.
-const AUDIO_STALL: f32 = 0.5;
+pub(super) const AUDIO_STALL: f32 = 0.5;
 /// Longest wait (seconds) for the decoder thread before the UI decodes the
 /// frame itself.
-const DECODER_PATIENCE: f32 = 0.25;
+pub(super) const DECODER_PATIENCE: f32 = 0.25;
 /// Pause on the last frame before the next video.
-const HOLD_END: f32 = 1.0;
-
-/// Indexed JPEG frames (see `convert_frames` in `build.rs`).
-#[derive(Clone, Copy)]
-struct FramePack {
-    fps: f64,
-    count: usize,
-    offsets: &'static [u8],
-    data: &'static [u8],
-}
-
-impl FramePack {
-    fn parse(bytes: &'static [u8]) -> Option<Self> {
-        let u32_at = |at: usize| -> Option<u32> {
-            Some(u32::from_le_bytes(bytes.get(at..at + 4)?.try_into().ok()?))
-        };
-        if bytes.get(..4)? != b"FSV1" {
-            return None;
-        }
-        let fps = f64::from(u32_at(4)?);
-        let count = u32_at(8)? as usize;
-        let offsets_end = 12 + (count + 1) * 4;
-        let offsets = bytes.get(12..offsets_end)?;
-        let data = bytes.get(offsets_end..)?;
-        (fps > 0.0 && count > 0).then_some(Self {
-            fps,
-            count,
-            offsets,
-            data,
-        })
-    }
-
-    fn offset(&self, i: usize) -> usize {
-        self.offsets
-            .get(i * 4..i * 4 + 4)
-            .and_then(|b| b.try_into().ok())
-            .map_or(0, |b| u32::from_le_bytes(b) as usize)
-    }
-
-    fn frame(&self, i: usize) -> Option<&'static [u8]> {
-        let i = i.min(self.count - 1);
-        self.data.get(self.offset(i)..self.offset(i + 1))
-    }
-
-    fn duration(&self) -> f64 {
-        self.count as f64 / self.fps
-    }
-}
-
-/// Decodes one frame; a broken frame (even a decoder panic) gives `None`
-/// instead of killing the decoder thread.
-fn decode_jpeg(bytes: &[u8]) -> Option<ColorImage> {
-    std::panic::catch_unwind(|| decode_jpeg_inner(bytes)).unwrap_or_else(|_| {
-        log::warn!("gift video frame: decoder panicked");
-        None
-    })
-}
-
-fn decode_jpeg_inner(bytes: &[u8]) -> Option<ColorImage> {
-    let options = DecoderOptions::default().jpeg_set_out_colorspace(ColorSpace::RGBA);
-    let mut decoder = JpegDecoder::new_with_options(ZCursor::new(bytes), options);
-    let pixels = decoder
-        .decode()
-        .map_err(|e| log::warn!("gift video frame: {e:?}"))
-        .ok()?;
-    let info = decoder.info()?;
-    let size = [usize::from(info.width), usize::from(info.height)];
-    (pixels.len() == size[0] * size[1] * 4)
-        .then(|| ColorImage::from_rgba_unmultiplied(size, &pixels))
-}
-
-/// Decodes one video's frames on a background thread, a few frames ahead of
-/// playback, so a slow decode (720p JPEG) never stalls a UI frame.
-struct FrameDecoder {
-    /// Frame the UI wants now; the thread skips ahead if it fell behind.
-    wanted: Arc<AtomicUsize>,
-    rx: Receiver<(usize, ColorImage)>,
-    /// A decoded frame that is not due yet.
-    pending: Option<(usize, ColorImage)>,
-}
-
-impl FrameDecoder {
-    fn start(pack: FramePack) -> Self {
-        let wanted = Arc::new(AtomicUsize::new(0));
-        let (tx, rx) = crossbeam_channel::bounded(4);
-        let thread_wanted = Arc::clone(&wanted);
-        let spawned = std::thread::Builder::new()
-            .name("gift-video".into())
-            .spawn(move || {
-                let mut next = 0;
-                while next < pack.count {
-                    next = next.max(thread_wanted.load(Ordering::Relaxed));
-                    if let Some(image) = pack.frame(next).and_then(decode_jpeg) {
-                        // Fails once the video is over (receiver dropped).
-                        if tx.send((next, image)).is_err() {
-                            return;
-                        }
-                    }
-                    next += 1;
-                }
-            });
-        if let Err(e) = spawned {
-            log::warn!("gift video thread: {e}");
-        }
-        Self {
-            wanted,
-            rx,
-            pending: None,
-        }
-    }
-
-    /// Newest decoded frame (index, image) at or before `want`, if a new one
-    /// is ready.
-    fn take(&mut self, want: usize) -> Option<(usize, ColorImage)> {
-        self.wanted.store(want, Ordering::Relaxed);
-        let mut newest = None;
-        while let Some((i, image)) = self.pending.take().or_else(|| self.rx.try_recv().ok()) {
-            if i <= want {
-                newest = Some((i, image));
-            } else {
-                self.pending = Some((i, image));
-                break;
-            }
-        }
-        newest
-    }
-}
+pub(super) const HOLD_END: f32 = 1.0;
 
 /// The greeting video sequence. See module docs.
 pub struct Greetings {
@@ -514,28 +356,5 @@ impl Greetings {
                 );
             }
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn parses_frame_pack() {
-        // Two fake "frames" of 3 and 2 bytes at 24 fps.
-        let mut pack = b"FSV1".to_vec();
-        for v in [24u32, 2, 0, 3, 5] {
-            pack.extend_from_slice(&v.to_le_bytes());
-        }
-        pack.extend_from_slice(&[1, 2, 3, 4, 5]);
-        let pack: &'static [u8] = Box::leak(pack.into_boxed_slice());
-        let p = FramePack::parse(pack).expect("valid pack");
-        assert_eq!(p.count, 2);
-        assert_eq!(p.frame(0), Some(&[1u8, 2, 3][..]));
-        assert_eq!(p.frame(1), Some(&[4u8, 5][..]));
-        assert_eq!(p.frame(9), Some(&[4u8, 5][..]), "clamps to the last frame");
-        assert!((p.duration() - 2.0 / 24.0).abs() < 1e-9);
-        assert!(FramePack::parse(b"NOPE").is_none());
     }
 }
