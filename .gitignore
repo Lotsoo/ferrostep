@@ -4,6 +4,14 @@
 catatan.txt
 .claude/settings.local.json
 
+# Local AI-assistant tooling (skills, settings)
+/.agents/
+/.claude/
+/skills-lock.json
+
+# Locally built release binaries (may contain the private gift media)
+/release/
+
 # Song library (user content, never committed)
 /Songs/
 
