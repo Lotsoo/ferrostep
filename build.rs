@@ -83,7 +83,7 @@ fn embed_gift_media() {
     if let Some(src) = find_trumpet() {
         println!("cargo:rerun-if-changed={}", src.display());
         let dst = out.join(format!("gift_trumpet_v{MEDIA_VERSION}.ogg"));
-        if fresh(&src, &dst) || convert_audio(&src, &dst) {
+        if fresh(&src, &dst) || convert_audio(&src, &dst, true) {
             trumpet = Some(dst);
         }
     }
@@ -102,7 +102,7 @@ fn embed_gift_media() {
         let frames = out.join(format!("gift_video{i}_v{MEDIA_VERSION}.frames"));
         let audio = out.join(format!("gift_video{i}_v{MEDIA_VERSION}.ogg"));
         let ok_frames = fresh(src, &frames) || convert_frames(src, &frames);
-        let ok_audio = fresh(src, &audio) || convert_audio(src, &audio);
+        let ok_audio = fresh(src, &audio) || convert_audio(src, &audio, false);
         if ok_frames && ok_audio {
             videos.push((display_name(src), frames, audio));
         }
@@ -176,14 +176,23 @@ fn ffmpeg(args: &[&str]) -> bool {
 }
 
 /// Audio track to Ogg Vorbis (gapless, so the trumpet loops cleanly).
-fn convert_audio(src: &Path, dst: &Path) -> bool {
+/// Audio track to Ogg Vorbis. `trim_start` cuts leading silence, so a looped
+/// sound repeats without a gap.
+fn convert_audio(src: &Path, dst: &Path, trim_start: bool) -> bool {
     let (Some(s), Some(d)) = (src.to_str(), dst.to_str()) else {
         return false;
+    };
+    let filter = if trim_start {
+        "silenceremove=start_periods=1:start_threshold=-45dB"
+    } else {
+        "anull"
     };
     ffmpeg(&[
         "-i",
         s,
         "-vn",
+        "-af",
+        filter,
         "-ac",
         "2",
         "-ar",
