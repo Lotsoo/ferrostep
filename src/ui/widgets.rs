@@ -501,13 +501,15 @@ pub fn segmented(ui: &mut Ui, palette: &Palette, options: &[&str], selected: &mu
         .collect();
     let widths: Vec<f32> = galleys.iter().map(|g| g.size().x + 28.0).collect();
     let total: f32 = widths.iter().sum::<f32>() + 8.0;
-    let (rect, _) = ui.allocate_exact_size(vec2(total, 36.0), Sense::hover());
+    let (rect, group) = ui.allocate_exact_size(vec2(total, 36.0), Sense::hover());
     ui.painter()
         .rect_filled(rect, RADIUS_BUTTON, palette.surface_hover);
     let mut x = rect.left() + 4.0;
     for (i, (opt, w)) in options.iter().zip(&widths).enumerate() {
         let r = Rect::from_min_size(pos2(x, rect.top() + 4.0), vec2(*w, 28.0));
-        let resp = ui.interact(r, ui.scope_id().with(("segmented", i)), Sense::click());
+        // IDs come from this control's own allocation, so two segmented
+        // controls in different rows never clash.
+        let resp = ui.interact(r, group.id.with(("segmented", i)), Sense::click());
         if resp.clicked() && *selected != i {
             *selected = i;
             changed = true;
@@ -623,4 +625,122 @@ pub fn key_hints(
         x += kw + GAP_KEY + lw + GAP_ITEM;
     }
     strip
+}
+
+/// Shortens `text` with "…" so it fits in `max_width` pixels in `font_id`.
+pub fn elide(painter: &Painter, text: &str, font_id: egui::FontId, max_width: f32) -> String {
+    let width = |t: &str| {
+        painter
+            .layout_no_wrap(t.to_string(), font_id.clone(), Color32::WHITE)
+            .size()
+            .x
+    };
+    if width(text) <= max_width {
+        return text.to_string();
+    }
+    let chars: Vec<char> = text.chars().collect();
+    // Binary search for the longest prefix that fits with the ellipsis.
+    let (mut lo, mut hi) = (0usize, chars.len());
+    while lo < hi {
+        let mid = (lo + hi).div_ceil(2);
+        let candidate: String = chars[..mid].iter().collect::<String>() + "…";
+        if width(&candidate) <= max_width {
+            lo = mid;
+        } else {
+            hi = mid - 1;
+        }
+    }
+    chars[..lo]
+        .iter()
+        .collect::<String>()
+        .trim_end()
+        .to_string()
+        + "…"
+}
+
+/// Readable slider: a bold value box, a thick track with a gradient fill and a
+/// big white knob. Click anywhere on the track or drag. `label` formats the
+/// value shown in the box. Returns a response whose `changed()` is set when
+/// the value moved (and `drag_stopped()` when a drag ends).
+pub fn slider(
+    ui: &mut Ui,
+    palette: &Palette,
+    value: &mut f64,
+    range: std::ops::RangeInclusive<f64>,
+    step: f64,
+    label: impl Fn(f64) -> String,
+) -> Response {
+    let (rect, mut resp) = ui.allocate_exact_size(vec2(300.0, 36.0), Sense::click_and_drag());
+    let (lo, hi) = (*range.start(), *range.end());
+    let value_box = Rect::from_min_size(rect.left_top(), vec2(86.0, rect.height()));
+    let track = Rect::from_min_max(
+        pos2(value_box.right() + 20.0, rect.center().y - 4.0),
+        pos2(rect.right() - 12.0, rect.center().y + 4.0),
+    );
+    if let Some(p) = resp.interact_pointer_pos()
+        && (resp.dragged() || resp.clicked() || resp.drag_started())
+        && p.x >= value_box.right()
+    {
+        let t = f64::from(((p.x - track.left()) / track.width()).clamp(0.0, 1.0));
+        let mut v = lo + t * (hi - lo);
+        if step > 0.0 {
+            v = (v / step).round() * step;
+        }
+        let v = v.clamp(lo, hi);
+        if (v - *value).abs() > f64::EPSILON {
+            *value = v;
+            resp.mark_changed();
+        }
+    }
+    let t = (((*value - lo) / (hi - lo)).clamp(0.0, 1.0)) as f32;
+    let hot = ui
+        .ctx()
+        .animate_bool(resp.id, resp.hovered() || resp.dragged());
+    let painter = ui.painter();
+
+    // Value box.
+    painter.rect_filled(value_box, RADIUS_BUTTON, palette.surface_hover);
+    painter.rect_stroke(
+        value_box,
+        RADIUS_BUTTON,
+        Stroke::new(1.0, palette.border.lerp_to_gamma(ACCENT_B, hot)),
+        StrokeKind::Inside,
+    );
+    painter.text(
+        value_box.center(),
+        Align2::CENTER_CENTER,
+        label(*value),
+        font_bold(theme::TEXT_S + 1.0),
+        palette.text,
+    );
+    // Track: clearly visible empty part, gradient filled part.
+    let empty = if palette.dark {
+        Color32::from_white_alpha(38)
+    } else {
+        Color32::from_black_alpha(30)
+    };
+    painter.rect_filled(track, theme::RADIUS_PILL, empty);
+    let filled = Rect::from_min_size(
+        track.min,
+        vec2((track.width() * t).max(track.height()), track.height()),
+    );
+    gradient_pill(painter, filled, ACCENT_A, ACCENT_B);
+    // Knob.
+    let knob = pos2(track.left() + track.width() * t, track.center().y);
+    let r = 10.0 + 2.0 * hot;
+    painter.circle_filled(
+        knob + vec2(0.0, 2.0),
+        r + 1.0,
+        Color32::from_black_alpha(70),
+    );
+    painter.circle_filled(knob, r, Color32::WHITE);
+    painter.circle_stroke(
+        knob,
+        r,
+        Stroke::new(2.0, ACCENT_B.gamma_multiply(0.6 + 0.4 * hot)),
+    );
+    if resp.hovered() || resp.dragged() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+    }
+    resp
 }

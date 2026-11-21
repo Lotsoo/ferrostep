@@ -69,7 +69,7 @@ impl Category {
 
     fn hint(self) -> &'static str {
         match self {
-            Category::Gameplay => "Kecepatan, arah, tingkat penilaian",
+            Category::Gameplay => "Kecepatan, arah, penilaian",
             Category::Audio => "Volume dan sinkronisasi",
             Category::Display => "Tema, ukuran, animasi",
             Category::Controls => "Keyboard dan dance mat",
@@ -239,7 +239,7 @@ impl SettingsScreen {
             pos2(rect.left() + 32.0, back.bottom() + 24.0),
             rect.max - vec2(32.0, 24.0),
         );
-        let side = Rect::from_min_size(body.min, vec2(240.0, body.height()));
+        let side = Rect::from_min_size(body.min, vec2(256.0, body.height()));
         widgets::card(ui.painter(), side, &palette);
         for (i, cat) in Category::ALL.iter().enumerate() {
             let r = Rect::from_min_size(
@@ -279,17 +279,24 @@ impl SettingsScreen {
                 color.gamma_multiply(if sel { 1.0 } else { 0.25 + 0.3 * t }),
                 Stroke::new(1.2, color),
             );
+            // Text never leaves the sidebar: shorten with "…" if needed.
+            let text_w = r.width() - 50.0 - 12.0;
             ui.painter().text(
                 r.left_top() + vec2(50.0, 10.0),
                 Align2::LEFT_TOP,
-                cat.label(),
+                widgets::elide(
+                    ui.painter(),
+                    cat.label(),
+                    font_bold(theme::TEXT_S + 1.0),
+                    text_w,
+                ),
                 font_bold(theme::TEXT_S + 1.0),
                 palette.text,
             );
             ui.painter().text(
                 r.left_top() + vec2(50.0, 32.0),
                 Align2::LEFT_TOP,
-                cat.hint(),
+                widgets::elide(ui.painter(), cat.hint(), font(theme::TEXT_XS), text_w),
                 font(theme::TEXT_XS),
                 palette.text_dim,
             );
@@ -495,10 +502,13 @@ impl SettingsScreen {
             "Debounce panel",
             "Abaikan sentuhan ganda dari mat murah. Naikkan bila satu injakan terbaca dua kali.",
             |ui| {
-                ui.add(
-                    egui::Slider::new(&mut shared.settings.gamepad_debounce_ms, 0.0..=60.0)
-                        .suffix(" ms")
-                        .step_by(1.0),
+                widgets::slider(
+                    ui,
+                    &palette,
+                    &mut shared.settings.gamepad_debounce_ms,
+                    0.0..=60.0,
+                    1.0,
+                    |v| format!("{v:.0} ms"),
                 );
             },
         );
@@ -542,10 +552,14 @@ impl SettingsScreen {
             "Folder lagu",
             "Tempat lagu (.sm/.ssc) dan hasil impor disimpan.",
         );
-        ui.label(
-            egui::RichText::new(root.display().to_string())
-                .font(font(theme::TEXT_S))
-                .color(palette.text),
+        // Long paths wrap instead of running out of the card.
+        ui.add(
+            egui::Label::new(
+                egui::RichText::new(root.display().to_string())
+                    .font(font(theme::TEXT_S))
+                    .color(palette.text),
+            )
+            .wrap_mode(egui::TextWrapMode::Wrap),
         );
         ui.label(
             egui::RichText::new(format!("{} lagu ditemukan", shared.library.songs.len()))
@@ -601,10 +615,13 @@ impl SettingsScreen {
             "Membuat audio hasil impor dari video lebih kecil (.ogg). Tanpa ffmpeg tetap bisa impor.",
         );
         match ffmpeg::find_ffmpeg(shared.settings.ffmpeg_path.as_deref()) {
-            Some(p) => ui.label(
-                egui::RichText::new(format!("✓ Ditemukan: {}", p.display()))
-                    .font(font(theme::TEXT_S))
-                    .color(SUCCESS),
+            Some(p) => ui.add(
+                egui::Label::new(
+                    egui::RichText::new(format!("✓ Ditemukan: {}", p.display()))
+                        .font(font(theme::TEXT_S))
+                        .color(SUCCESS),
+                )
+                .wrap_mode(egui::TextWrapMode::Wrap),
             ),
             None => ui.label(
                 egui::RichText::new("ⓘ Tidak ditemukan (tidak masalah).")
@@ -774,11 +791,14 @@ fn gameplay_section(ui: &mut Ui, shared: &mut Shared) {
             "Kecepatan panah",
             "Makin besar, panah makin cepat dan renggang. Pemula: 400–550.",
             |ui| {
-                ui.add(
-                    egui::Slider::new(&mut s.cmod, 150.0..=1200.0)
-                        .step_by(10.0)
-                        .prefix("C"),
-                );
+                let mut v = f64::from(s.cmod);
+                if widgets::slider(ui, &palette, &mut v, 150.0..=1200.0, 10.0, |v| {
+                    format!("C{v:.0}")
+                })
+                .changed()
+                {
+                    s.cmod = v as f32;
+                }
             },
         ),
         ScrollMode::XMod => setting_row(
@@ -787,11 +807,14 @@ fn gameplay_section(ui: &mut Ui, shared: &mut Shared) {
             "Pengali kecepatan",
             "Kecepatan = BPM lagu × pengali.",
             |ui| {
-                ui.add(
-                    egui::Slider::new(&mut s.xmod, 0.5..=8.0)
-                        .step_by(0.25)
-                        .suffix("×"),
-                );
+                let mut v = f64::from(s.xmod);
+                if widgets::slider(ui, &palette, &mut v, 0.5..=8.0, 0.25, |v| {
+                    format!("{v:.2}×")
+                })
+                .changed()
+                {
+                    s.xmod = v as f32;
+                }
             },
         ),
     }
@@ -834,16 +857,13 @@ fn gameplay_section(ui: &mut Ui, shared: &mut Shared) {
         "Kecerahan latar",
         "Latar lagu saat bermain. Lebih gelap = panah lebih jelas.",
         |ui| {
-            let mut pct = s.background_brightness * 100.0;
-            if ui
-                .add(
-                    egui::Slider::new(&mut pct, 0.0..=100.0)
-                        .step_by(5.0)
-                        .suffix("%"),
-                )
-                .changed()
+            let mut pct = f64::from(s.background_brightness) * 100.0;
+            if widgets::slider(ui, &palette, &mut pct, 0.0..=100.0, 5.0, |v| {
+                format!("{v:.0}%")
+            })
+            .changed()
             {
-                s.background_brightness = pct / 100.0;
+                s.background_brightness = (pct / 100.0) as f32;
             }
         },
     );
@@ -861,16 +881,13 @@ fn audio_section(ui: &mut Ui, shared: &mut Shared) -> bool {
         "Volume",
         "Volume utama musik dan efek.",
         |ui| {
-            let mut pct = s.volume * 100.0;
-            if ui
-                .add(
-                    egui::Slider::new(&mut pct, 0.0..=100.0)
-                        .step_by(1.0)
-                        .suffix("%"),
-                )
-                .changed()
+            let mut pct = f64::from(s.volume) * 100.0;
+            if widgets::slider(ui, &palette, &mut pct, 0.0..=100.0, 1.0, |v| {
+                format!("{v:.0}%")
+            })
+            .changed()
             {
-                s.volume = pct / 100.0;
+                s.volume = (pct / 100.0) as f32;
             }
         },
     );
@@ -880,16 +897,13 @@ fn audio_section(ui: &mut Ui, shared: &mut Shared) -> bool {
         "Efek suara menu",
         "Bunyi saat memilih, berpindah menu, dan memulai lagu. 0% = mati.",
         |ui| {
-            let mut pct = s.sfx_volume * 100.0;
-            if ui
-                .add(
-                    egui::Slider::new(&mut pct, 0.0..=100.0)
-                        .step_by(1.0)
-                        .suffix("%"),
-                )
-                .changed()
+            let mut pct = f64::from(s.sfx_volume) * 100.0;
+            if widgets::slider(ui, &palette, &mut pct, 0.0..=100.0, 1.0, |v| {
+                format!("{v:.0}%")
+            })
+            .changed()
             {
-                s.sfx_volume = pct / 100.0;
+                s.sfx_volume = (pct / 100.0) as f32;
             }
         },
     );
@@ -902,10 +916,13 @@ fn audio_section(ui: &mut Ui, shared: &mut Shared) -> bool {
             if widgets::secondary_button(ui, &palette, "+5", vec2(44.0, 32.0)).clicked() {
                 s.global_offset_ms += 5.0;
             }
-            ui.add(
-                egui::Slider::new(&mut s.global_offset_ms, -300.0..=300.0)
-                    .step_by(1.0)
-                    .suffix(" ms"),
+            widgets::slider(
+                ui,
+                &palette,
+                &mut s.global_offset_ms,
+                -300.0..=300.0,
+                1.0,
+                |v| format!("{v:+.0} ms"),
             );
             if widgets::secondary_button(ui, &palette, "−5", vec2(44.0, 32.0)).clicked() {
                 s.global_offset_ms -= 5.0;
@@ -961,15 +978,13 @@ fn display_section(ui: &mut Ui, shared: &mut Shared) {
         "Ukuran antarmuka",
         "Perbesar bila teks terlalu kecil di layar Anda.",
         |ui| {
-            let mut pct = (s.ui_scale * 100.0).round();
-            let resp = ui.add(
-                egui::Slider::new(&mut pct, 90.0..=150.0)
-                    .step_by(10.0)
-                    .suffix("%"),
-            );
+            let mut pct = f64::from((s.ui_scale * 100.0).round());
+            let resp = widgets::slider(ui, &palette, &mut pct, 90.0..=150.0, 10.0, |v| {
+                format!("{v:.0}%")
+            });
             // Apply when the drag ends so the slider does not jump under the mouse.
             if resp.drag_stopped() || (resp.changed() && !resp.dragged()) {
-                s.ui_scale = pct / 100.0;
+                s.ui_scale = (pct / 100.0) as f32;
             }
         },
     );
