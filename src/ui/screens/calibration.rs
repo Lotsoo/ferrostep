@@ -307,27 +307,6 @@ impl Calibration {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::math::*;
-
-    #[test]
-    fn nearest_click() {
-        let clicks = [0.0, 0.6, 1.2];
-        assert!((nearest_offset(&clicks, 0.65).unwrap() - 0.05).abs() < 1e-9);
-        assert!((nearest_offset(&clicks, 1.15).unwrap() + 0.05).abs() < 1e-9);
-    }
-
-    #[test]
-    fn stats_drop_outliers() {
-        let mut v = vec![0.020; 15];
-        v.push(0.200);
-        let (mean, sd) = robust_stats(&v).unwrap();
-        assert!((mean - 0.020).abs() < 1e-9, "{mean}");
-        assert!(sd < 1e-9);
-    }
-}
-
 /// Half-width of the strip in seconds (taps beyond are pinned to the edge).
 const STRIP_RANGE: f64 = 0.15;
 
@@ -405,5 +384,26 @@ fn draw_tap_strip(
             font_bold(theme::TEXT_M * scale),
             color.gamma_multiply(alpha),
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::math::*;
+
+    #[test]
+    fn nearest_click() {
+        let clicks = [0.0, 0.6, 1.2];
+        assert!((nearest_offset(&clicks, 0.65).unwrap() - 0.05).abs() < 1e-9);
+        assert!((nearest_offset(&clicks, 1.15).unwrap() + 0.05).abs() < 1e-9);
+    }
+
+    #[test]
+    fn stats_drop_outliers() {
+        let mut v = vec![0.020; 15];
+        v.push(0.200);
+        let (mean, sd) = robust_stats(&v).unwrap();
+        assert!((mean - 0.020).abs() < 1e-9, "{mean}");
+        assert!(sd < 1e-9);
     }
 }
