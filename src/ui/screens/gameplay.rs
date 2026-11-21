@@ -61,6 +61,8 @@ pub struct GameplayScreen {
     last_combo: u32,
     /// Last countdown number that played its sound (4 = none yet, 0 = "go").
     count_played: i32,
+    /// Last milestone that played its sound (only every 100 combo).
+    milestone_sounded: u32,
 }
 
 impl GameplayScreen {
@@ -104,6 +106,7 @@ impl GameplayScreen {
             hud: HudAnim::default(),
             last_combo: 0,
             count_played: 4,
+            milestone_sounded: 0,
             request,
             music_path,
             session,
@@ -339,6 +342,17 @@ impl GameplayScreen {
             self.session.update(self.song_time);
             self.countdown_sounds(shared);
             self.handle_events(now);
+            let combo = self.session.score.combo;
+            if combo < self.milestone_sounded {
+                self.milestone_sounded = 0;
+            }
+            if let Some((c, _)) = self.hud.milestone(now)
+                && c.is_multiple_of(100)
+                && c > self.milestone_sounded
+            {
+                self.milestone_sounded = c;
+                shared.sfx(crate::audio::Sfx::Success);
+            }
 
             let music_done = self.music.as_ref().is_some_and(Music::is_stopped);
             let failed = self.session.score.failed && !shared.settings.no_fail;
@@ -426,6 +440,9 @@ impl GameplayScreen {
         let scroll = Scroll::new(&shared.settings, &layout, &self.timing, self.song_time);
         hud::draw_stage(&painter, &stage);
         hud::draw_lane(&painter, &stage, &scroll, &self.timing, &self.hud);
+        if let Some((_, age)) = self.hud.milestone(now).filter(|_| !reduce) {
+            hud::draw_milestone_surge(&painter, &stage, age);
+        }
 
         notefield::draw_receptors(&painter, &layout, self.columns, &pressed, pulse, false);
         let clipped = painter.with_clip_rect(rect);

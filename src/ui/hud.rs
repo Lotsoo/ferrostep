@@ -190,6 +190,75 @@ fn draw_side_stage(painter: &Painter, s: &Stage, light: f32) {
     }
 }
 
+/// Combo milestone celebration: a band of light in the four arrow colors
+/// sweeps along the lane away from the receptors, and sparks burst from both
+/// lane edges. Drawn under the notes so arrows stay readable.
+pub fn draw_milestone_surge(painter: &Painter, s: &Stage, age: f32) {
+    if age > 1.0 {
+        return;
+    }
+    let width = s.layout.width(s.columns);
+    let left = s.layout.left;
+    let lane = Rect::from_min_max(
+        pos2(left, s.rect.top()),
+        pos2(left + width, s.rect.bottom()),
+    );
+    let lane_painter = painter.with_clip_rect(lane);
+    // Sweep: from the receptor line toward the far end of the lane.
+    let e = anim::ease_out_cubic((age / 0.7).min(1.0));
+    let far = if s.layout.dir > 0.0 {
+        s.rect.bottom()
+    } else {
+        s.rect.top()
+    };
+    let y = s.layout.receptor_y + (far - s.layout.receptor_y) * e;
+    let fade = 1.0 - (age / 1.0);
+    let band = 70.0;
+    for c in 0..s.columns.min(4) {
+        let col = Rect::from_min_max(
+            pos2(left + s.layout.lane * f32::from(c), y - band),
+            pos2(left + s.layout.lane * f32::from(c + 1), y + band),
+        );
+        let color = column_color(c);
+        widgets::vertical_gradient(
+            &lane_painter,
+            Rect::from_min_max(col.min, pos2(col.max.x, y)),
+            Color32::TRANSPARENT,
+            color.gamma_multiply(0.35 * fade),
+        );
+        widgets::vertical_gradient(
+            &lane_painter,
+            Rect::from_min_max(pos2(col.min.x, y), col.max),
+            color.gamma_multiply(0.35 * fade),
+            Color32::TRANSPARENT,
+        );
+    }
+    lane_painter.line_segment(
+        [pos2(lane.left(), y), pos2(lane.right(), y)],
+        Stroke::new(2.0, Color32::WHITE.gamma_multiply(0.7 * fade)),
+    );
+    // Sparks from both edges of the lane, at the receptors.
+    let base_y = s.layout.receptor_y;
+    for side in [-1.0f32, 1.0] {
+        let x = if side < 0.0 {
+            lane.left()
+        } else {
+            lane.right()
+        };
+        for i in 0..10 {
+            let a = (i as f32 / 9.0 - 0.5) * 1.4; // spread angle
+            let dir = vec2(side * a.cos(), a.sin() * s.layout.dir.signum() * -1.0);
+            let d = 20.0 + e * (90.0 + (i % 3) as f32 * 40.0);
+            let color = column_color((i % 4) as u8);
+            painter.circle_filled(
+                pos2(x, base_y) + dir * d,
+                3.0 * (1.0 - e) + 0.5,
+                color.gamma_multiply(fade),
+            );
+        }
+    }
+}
+
 pub fn draw_stage(painter: &Painter, s: &Stage) {
     let rect = s.rect;
     widgets::vertical_gradient(
