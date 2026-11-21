@@ -9,6 +9,7 @@ pub mod letter;
 pub mod notefield;
 pub mod screens;
 pub mod theme;
+pub mod tutorial;
 pub mod widgets;
 
 use std::time::Instant;

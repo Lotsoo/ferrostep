@@ -12,8 +12,9 @@ use crate::timing::TimingMap;
 use crate::ui::theme::{self, ACCENT_A, ACCENT_B, column_color, font, font_bold};
 use crate::ui::{anim, beatfx, widgets};
 
-const ITEMS: [(&str, &str); 3] = [
+const ITEMS: [(&str, &str); 4] = [
     ("Main", "Pilih lagu dan mulai bermain"),
+    ("Tutorial", "Belajar main langkah demi langkah"),
     ("Impor Lagu", "Ubah MP3/MP4 menjadi chart otomatis"),
     ("Pengaturan", "Kontrol, dance mat, audio, tampilan"),
 ];
@@ -108,7 +109,8 @@ impl TitleScreen {
     fn choose(&self, i: usize) -> Nav {
         match i {
             0 => Nav::SongSelect,
-            1 => Nav::Import(Vec::new()),
+            1 => Nav::Tutorial,
+            2 => Nav::Import(Vec::new()),
             _ => Nav::Settings,
         }
     }
@@ -242,12 +244,12 @@ impl TitleScreen {
 
         // Menu tiles on the right.
         let appear = anim::ease_out_cubic(anim::progress(self.opened, input.now, 0.4, reduce));
-        let tile = vec2(420.0, 92.0);
+        let tile = vec2(420.0, 84.0);
         let x = rect.left() + rect.width() * 0.62;
         let mut nav = None;
         for (i, (title, sub)) in ITEMS.iter().enumerate() {
-            let y = rect.center().y - 150.0
-                + i as f32 * (tile.y + 16.0)
+            let y = rect.center().y - 196.0
+                + i as f32 * (tile.y + 14.0)
                 + (1.0 - appear) * 30.0 * (i as f32 + 1.0);
             let r = Rect::from_min_size(pos2(x, y), tile);
             if self.selected == i && beat.live {

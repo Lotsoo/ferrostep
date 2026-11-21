@@ -211,3 +211,11 @@ Di sesi Wayland, zona impor otomatis berganti teks "Klik untuk memilih file" (di
   - Terompet (`private/terompet.*`) diputar berulang selama surat terbuka, berhenti (fade) saat tombol terakhir ditekan.
   - Lalu video ucapan (`private/video/*.mp4`, urut nama file, "1-Kodok.mp4" → "Ucapan dari Kodok") diputar berurutan di kartu (`ui/gift.rs`), tanpa tombol apa pun, tidak bisa dilewati/dijeda/ditutup.
   - build.rs mengonversi media dengan ffmpeg di mesin pengembang (video → paket frame JPEG 24 fps 432p, audio → Ogg Vorbis), lalu disematkan di exe (~25 MB). Dekode frame: crate `zune-jpeg` (sudah ada di dependency tree lewat egui/rfd). Build publik/CI tidak berisi apa pun.
+
+## Sesi 2026-11-21 — kelancaran, kalibrasi, tutorial
+- **Lag/stutter diperbaiki (penyebab terukur):** teks beranimasi (judgment, combo, hitung mundur, stempel, logo) mengubah ukuran font tiap frame → atlas font egui terus penuh dan dibangun ulang → frame macet 50–300 ms. Sekarang teks dibuat sekali di ukuran tetap lalu diskalakan sebagai shape (`widgets::scale_shape`, `text_tracked_scaled`, `tabular_text_scaled`); `theme::font` membulatkan ukuran ke 0,5 pt sebagai pengaman. Hasil uji autoplay: atlas stabil 6%, tidak ada frame > 25 ms selama lagu.
+- **Jam lagu lebih halus:** `AudioClock` kini berjalan dengan timer monoton dan hanya "disetir" ke posisi audio (konstanta waktu 150 ms, lompat bila beda > 60 ms). Getaran waktu per frame turun dari 2,8 ms → 0,09 ms RMS.
+- **Video kado:** 720p 30 fps (q5), didekode di thread terpisah (`FrameDecoder`). Exe ±100 MB lebih besar (hanya build lokal).
+- **Kalibrasi baru:** metronom = satu track audio (posisinya jadi jam, sama seperti gameplay). Alur: penjelasan 3 langkah → hitungan 4-3-2-1 → 16 ketukan (tanpa denyut visual, hanya umpan balik) → hasil "Simpan/Ulangi/Batal". Ketukan kurang → diminta coba lagi. `--open calibrate`.
+- **Tutorial interaktif (`ui/tutorial.rs`):** 6 pelajaran; panah berhenti dan menunggu di target sampai ditekan (gaya Piano Tiles), tiap tekanan memainkan nada melodi "Twinkle Twinkle" (tradisional). Ada di onboarding (langkah ke-2) dan di menu utama (tombol "Tutorial"); `--open tutorial`.
+- Belum diuji: kalibrasi & tutorial dengan dance mat sungguhan; terasa/tidaknya kelancaran di sesi Wayland asli (pengujian di XWayland).

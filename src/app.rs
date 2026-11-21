@@ -106,6 +106,7 @@ enum Screen {
     Gameplay(Box<GameplayScreen>),
     Results(Box<ResultsScreen>),
     PadSetup(Box<PadSetupScreen>),
+    Tutorial(Box<crate::ui::screens::tutorial::TutorialScreen>),
 }
 
 /// The whole app.
@@ -148,7 +149,10 @@ impl Screen {
     fn depth(&self) -> u8 {
         match self {
             Screen::Title(_) | Screen::Onboarding(_) => 0,
-            Screen::SongSelect(_) | Screen::Import(_) | Screen::Settings(_) => 1,
+            Screen::SongSelect(_)
+            | Screen::Import(_)
+            | Screen::Settings(_)
+            | Screen::Tutorial(_) => 1,
             Screen::PadSetup(_) | Screen::Gameplay(_) => 2,
             Screen::Results(_) => 3,
         }
@@ -245,6 +249,7 @@ impl FerrostepApp {
             Some("import") => app.navigate(Nav::Import(Vec::new())),
             Some("settings") => app.navigate(Nav::Settings),
             Some("calibrate") => app.navigate(Nav::Calibrate),
+            Some("tutorial") => app.navigate(Nav::Tutorial),
             Some(other) => log::warn!("--open: unknown screen '{other}'"),
             None => {}
         }
@@ -283,8 +288,8 @@ impl FerrostepApp {
         let quiet = match &self.screen {
             Screen::Gameplay(g) => !g.is_paused(),
             Screen::Settings(s) => s.is_calibrating(),
-            Screen::Onboarding(o) => o.is_calibrating(),
-            Screen::PadSetup(_) => true,
+            Screen::Onboarding(o) => o.is_calibrating() || o.in_tutorial(),
+            Screen::PadSetup(_) | Screen::Tutorial(_) => true,
             _ => false,
         };
         if quiet {
@@ -321,6 +326,7 @@ impl FerrostepApp {
             }
             Nav::Settings => Screen::Settings(Box::new(SettingsScreen::new(None))),
             Nav::Calibrate => Screen::Settings(Box::new(SettingsScreen::calibrating())),
+            Nav::Tutorial => Screen::Tutorial(Box::default()),
             Nav::PadSetup {
                 key,
                 name,
@@ -622,6 +628,7 @@ impl FerrostepApp {
             Screen::Gameplay(s) => s.ui(ui, shared, input),
             Screen::Results(s) => s.ui(ui, shared, input),
             Screen::PadSetup(s) => s.ui(ui, shared, input),
+            Screen::Tutorial(s) => s.ui(ui, shared, input),
         }
     }
 }

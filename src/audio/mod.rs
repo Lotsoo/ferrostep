@@ -197,6 +197,29 @@ impl Audio {
         })
     }
 
+    /// Plays a soft plucked tone (tutorial melody): a few harmonics with an
+    /// exponential decay, about `length` seconds long.
+    pub fn play_tone(&mut self, frequency: f32, length: f32) {
+        let rate = SYNTH_SAMPLE_RATE as f32;
+        let total = ((length + 0.3) * rate) as usize;
+        let decay = 3.2 / length.max(0.2);
+        let samples: Vec<f32> = (0..total)
+            .map(|i| {
+                let t = i as f32 / rate;
+                let attack = (t / 0.006).min(1.0);
+                let tail = ((total - i) as f32 / (0.03 * rate)).min(1.0);
+                let w = TAU * frequency * t;
+                let tone = w.sin() * (-t * decay).exp()
+                    + 0.35 * (2.0 * w).sin() * (-t * decay * 1.8).exp()
+                    + 0.12 * (3.0 * w).sin() * (-t * decay * 3.0).exp();
+                tone * 0.32 * attack * tail
+            })
+            .collect();
+        if let Err(e) = self.manager.play(mono_sound(samples)) {
+            log::debug!("tone failed: {e}");
+        }
+    }
+
     /// Plays a metronome as one audio track: `lead` seconds of silence, then
     /// `beats` clicks at `bpm` (every 4th accented). Its position is a precise
     /// clock for calibration: the clicks are exactly where the track says.

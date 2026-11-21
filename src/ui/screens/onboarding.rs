@@ -1,4 +1,5 @@
-//! First-run onboarding (≤ 1 minute, skippable): controls → calibration → first song.
+//! First-run onboarding (skippable): controls → interactive tutorial →
+//! calibration → first song.
 
 use std::time::Instant;
 
@@ -11,11 +12,12 @@ use crate::input::{FrameInput, MenuAction};
 use crate::ui::theme::{self, ACCENT_B, COLUMN_COLORS, SUCCESS, font, font_bold};
 use crate::ui::{anim, beatfx, notefield, widgets};
 
-const STEP_TITLES: [&str; 3] = ["Kontrol", "Sinkronisasi", "Mulai main"];
+const STEP_TITLES: [&str; 4] = ["Kontrol", "Tutorial", "Sinkronisasi", "Mulai main"];
 
 pub struct OnboardingScreen {
     step: usize,
     calibration: Option<Calibration>,
+    tutorial: Option<crate::ui::tutorial::Tutorial>,
     lit: [Option<Instant>; 4],
     step_started: Instant,
 }
@@ -25,6 +27,7 @@ impl Default for OnboardingScreen {
         Self {
             step: 0,
             calibration: None,
+            tutorial: None,
             lit: [None; 4],
             step_started: Instant::now(),
         }
@@ -37,9 +40,15 @@ impl OnboardingScreen {
         self.calibration.is_some()
     }
 
+    /// True while the tutorial runs (its melody must not mix with menu sounds).
+    pub fn in_tutorial(&self) -> bool {
+        self.step == 1
+    }
+
     fn next(&mut self) {
         self.step += 1;
         self.calibration = None;
+        self.tutorial = None;
         self.step_started = Instant::now();
     }
 
@@ -65,7 +74,7 @@ impl OnboardingScreen {
         // Steps drawn as notes on a track: arrows joined by a line.
         let top = rect.top() + 48.0;
         let xs: Vec<f32> = (0..STEP_TITLES.len())
-            .map(|i| rect.center().x + (i as f32 - 1.0) * 160.0)
+            .map(|i| rect.center().x + (i as f32 - 1.5) * 150.0)
             .collect();
         for w in xs.windows(2).enumerate() {
             let (i, pair) = w;
@@ -153,7 +162,8 @@ impl OnboardingScreen {
 
         match self.step {
             0 => self.controls_step(ui, shared, input, area),
-            1 => self.calibration_step(ui, shared, input, area),
+            1 => self.tutorial_step(ui, shared, input, rect),
+            2 => self.calibration_step(ui, shared, input, area),
             _ => start_step(ui, shared, input, area),
         }
     }
@@ -264,6 +274,41 @@ impl OnboardingScreen {
             .clicked()
             || input.has(MenuAction::Confirm)
         {
+            self.next();
+        }
+        None
+    }
+
+    fn tutorial_step(
+        &mut self,
+        ui: &mut Ui,
+        shared: &mut Shared,
+        input: &FrameInput,
+        rect: Rect,
+    ) -> Option<Nav> {
+        let palette = shared.palette;
+        // The tutorial needs room: it uses the space below the step track.
+        let area = Rect::from_min_max(
+            pos2(rect.left() + 48.0, rect.top() + 108.0),
+            pos2(rect.right() - 48.0, rect.bottom() - 16.0),
+        );
+        let skip = Rect::from_min_size(
+            pos2(rect.right() - 172.0, rect.top() + 76.0),
+            vec2(140.0, 36.0),
+        );
+        if ui
+            .put(skip, |ui: &mut Ui| {
+                widgets::secondary_button(ui, &palette, "Lewati tutorial", skip.size())
+            })
+            .clicked()
+        {
+            self.next();
+            return None;
+        }
+        let tutorial = self
+            .tutorial
+            .get_or_insert_with(|| crate::ui::tutorial::Tutorial::new(true));
+        if tutorial.ui(ui, area, shared, input).is_some() {
             self.next();
         }
         None

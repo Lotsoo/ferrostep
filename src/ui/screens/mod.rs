@@ -9,6 +9,7 @@ pub mod results;
 pub mod settings;
 pub mod song_select;
 pub mod title;
+pub mod tutorial;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -50,6 +51,8 @@ pub enum Nav {
     Settings,
     /// Settings, straight into the offset calibration.
     Calibrate,
+    /// The interactive tutorial (from the main menu).
+    Tutorial,
     /// Mapping wizard for a dance mat.
     PadSetup {
         key: String,
