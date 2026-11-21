@@ -188,7 +188,7 @@ pub fn color_from_hash(text: &str) -> Color32 {
 /// The stretch moves from `previous` to `current` as `progress` goes 0 → 1,
 /// and the row keeps its spacing, so dots never overlap. `anchor` is the
 /// vertical center and the left, center or right end of the row (`align`).
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments)] // plain values from two callers; a struct would only rename them
 pub fn page_dots(
     painter: &Painter,
     anchor: Pos2,

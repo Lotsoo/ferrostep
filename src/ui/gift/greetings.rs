@@ -205,7 +205,7 @@ impl Greetings {
         false
     }
 
-    #[allow(clippy::too_many_arguments)]
+    #[allow(clippy::too_many_arguments)] // drawing helper for a single call site
     fn card(
         &self,
         ui: &mut Ui,
