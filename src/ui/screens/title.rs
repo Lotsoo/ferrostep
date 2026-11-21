@@ -9,8 +9,8 @@ use crate::app::Shared;
 use crate::audio::Music;
 use crate::input::{FrameInput, MenuAction};
 use crate::timing::TimingMap;
-use crate::ui::theme::{self, ACCENT_A, ACCENT_B, font, font_bold};
-use crate::ui::{anim, widgets};
+use crate::ui::theme::{self, ACCENT_A, ACCENT_B, column_color, font, font_bold};
+use crate::ui::{anim, beatfx, widgets};
 
 const ITEMS: [(&str, &str); 3] = [
     ("Main", "Pilih lagu dan mulai bermain"),
@@ -138,19 +138,28 @@ impl TitleScreen {
             anim::since(shared.start, input.now)
         };
 
-        // Pulsing rings around the logo, on the beat.
-        // Follow the music's real beat when it plays, otherwise a calm default tempo.
-        let beat = match &self.music {
-            Some(m) if !m.music.is_stopped() => m
-                .timing
-                .seconds_to_beat(m.music.position() - shared.settings.global_offset())
-                as f32,
-            _ => t * TITLE_BPM / 60.0,
+        // Follow the music's real beat when it plays, otherwise a calm idle tempo.
+        let mut beat = match &self.music {
+            Some(m) if !m.music.is_stopped() => beatfx::Beat::from_music(
+                &m.timing,
+                m.music.position() - shared.settings.global_offset(),
+            ),
+            _ => beatfx::Beat::idle(t * TITLE_BPM / 80.0),
         };
-        let logo_center = pos2(rect.left() + rect.width() * 0.32, rect.center().y - 20.0);
+        if reduce {
+            beat = beat.calm();
+        }
+        if palette.dark {
+            beatfx::draw_highway(&painter, rect, ACCENT_A, &beat);
+        }
+        let b = beat.beat as f32;
+        let pulse = beat.pulse;
+        let logo_center = pos2(rect.left() + rect.width() * 0.32, rect.center().y - 60.0);
+
+        // Shockwave rings on the beat, a bigger one on each bar.
         if !reduce {
             for k in 0..3 {
-                let phase = (beat + k as f32 / 3.0).fract();
+                let phase = (b + k as f32 / 3.0).rem_euclid(1.0);
                 let r = 80.0 + phase * 260.0;
                 let alpha = (1.0 - phase).powi(2) * 0.25;
                 painter.circle_stroke(
@@ -164,27 +173,71 @@ impl TitleScreen {
                     ),
                 );
             }
+            let bar = (b / 4.0).rem_euclid(1.0);
+            if beat.live {
+                painter.circle_stroke(
+                    logo_center,
+                    120.0 + bar * 420.0,
+                    Stroke::new(
+                        4.0 * (1.0 - bar),
+                        ACCENT_B.gamma_multiply(0.35 * (1.0 - bar)),
+                    ),
+                );
+            }
         }
-        let pulse = if reduce {
-            0.0
-        } else {
-            (1.0 - beat.fract()).powi(4)
-        };
         crate::ui::notefield::draw_glow(
             &painter,
             logo_center,
-            160.0 + pulse * 20.0,
+            160.0 + pulse * 30.0,
             ACCENT_A,
-            0.6 + pulse * 0.3,
+            0.6 + pulse * 0.4 + beat.downbeat * 0.3,
         );
 
-        draw_gradient_logo(&painter, logo_center, "Ferrostep", 96.0, t);
+        draw_gradient_logo(&painter, logo_center, "Ferrostep", 96.0, t, &beat, reduce);
         painter.text(
-            logo_center + vec2(0.0, 72.0),
+            logo_center + vec2(0.0, 70.0),
             Align2::CENTER_CENTER,
             "Injak ketukannya.",
             font(theme::TEXT_M),
             palette.text_dim,
+        );
+
+        // Four arrows lighting up in turn, like a chart playing along.
+        let current = beat.beat.rem_euclid(4.0).floor() as u8;
+        for c in 0..4u8 {
+            let center = logo_center + vec2((f32::from(c) - 1.5) * 76.0, 150.0);
+            let lit = beat.live && c == current;
+            let pop = if lit { pulse } else { 0.0 };
+            let color = column_color(c);
+            if lit {
+                crate::ui::notefield::radial_light(&painter, center, 70.0, color, 0.7 * pop);
+            }
+            crate::ui::notefield::draw_arrow(
+                &painter,
+                center,
+                54.0 + 10.0 * pop,
+                c,
+                if lit {
+                    color.lerp_to_gamma(Color32::WHITE, 0.35 * pop)
+                } else {
+                    color.gamma_multiply(0.18)
+                },
+                Stroke::new(
+                    2.0,
+                    if lit {
+                        Color32::WHITE.gamma_multiply(0.6 + 0.4 * pop)
+                    } else {
+                        color.gamma_multiply(0.55)
+                    },
+                ),
+            );
+        }
+        // Equalizer under the arrows.
+        beatfx::draw_equalizer(
+            &painter,
+            Rect::from_center_size(logo_center + vec2(0.0, 232.0), vec2(330.0, 46.0)),
+            (ACCENT_A, ACCENT_B),
+            &beat,
         );
 
         // Menu tiles on the right.
@@ -197,6 +250,18 @@ impl TitleScreen {
                 + i as f32 * (tile.y + 16.0)
                 + (1.0 - appear) * 30.0 * (i as f32 + 1.0);
             let r = Rect::from_min_size(pos2(x, y), tile);
+            if self.selected == i && beat.live {
+                // The focused tile breathes on the beat.
+                painter.rect_stroke(
+                    r.expand(4.0 + 4.0 * pulse),
+                    theme::RADIUS_CARD + 4,
+                    Stroke::new(
+                        2.0 + 3.0 * pulse,
+                        ACCENT_B.gamma_multiply(0.15 + 0.45 * pulse),
+                    ),
+                    egui::StrokeKind::Outside,
+                );
+            }
             let resp = ui.put(r, |ui: &mut Ui| {
                 widgets::menu_tile(ui, &palette, title, sub, tile, self.selected == i)
             });
@@ -223,12 +288,15 @@ impl TitleScreen {
         if let Some(m) = &self.music
             && !m.music.is_stopped()
         {
+            // "Now playing" with a tiny live equalizer.
+            let eq = Rect::from_min_size(rect.left_bottom() + vec2(24.0, -40.0), vec2(26.0, 22.0));
+            beatfx::draw_equalizer(&painter, eq, (ACCENT_A, ACCENT_B), &beat);
             painter.text(
-                rect.left_bottom() + vec2(24.0, -28.0),
+                pos2(eq.right() + 10.0, eq.center().y),
                 Align2::LEFT_CENTER,
-                format!("♪ {}", super::song_select::truncate(&m.label, 50)),
-                font(theme::TEXT_XS),
-                palette.text_dim,
+                super::song_select::truncate(&m.label, 50),
+                font_bold(theme::TEXT_XS),
+                palette.text,
             );
         }
         if let Some(name) = &shared.gamepad_name {
@@ -244,9 +312,19 @@ impl TitleScreen {
     }
 }
 
-/// Draws text where each letter gets a color from a slowly moving gradient.
-fn draw_gradient_logo(painter: &egui::Painter, center: egui::Pos2, text: &str, size: f32, t: f32) {
-    let font_id = font_bold(size);
+/// Draws the logo; letters take colors from a slowly moving gradient and hop
+/// one after another on each beat (a wave running through the word).
+fn draw_gradient_logo(
+    painter: &egui::Painter,
+    center: egui::Pos2,
+    text: &str,
+    size: f32,
+    t: f32,
+    beat: &beatfx::Beat,
+    reduce: bool,
+) {
+    let scale = 1.0 + if reduce { 0.0 } else { 0.05 * beat.downbeat };
+    let font_id = font_bold(size * scale);
     let widths: Vec<f32> = text
         .chars()
         .map(|c| {
@@ -259,16 +337,26 @@ fn draw_gradient_logo(painter: &egui::Painter, center: egui::Pos2, text: &str, s
     let total: f32 = widths.iter().sum();
     let mut x = center.x - total / 2.0;
     let n = text.chars().count().max(1) as f32;
+    let phase = beat.beat.rem_euclid(1.0) as f32;
     for (i, (c, w)) in text.chars().zip(widths).enumerate() {
-        let phase = ((i as f32 / n) + t * 0.15).sin() * 0.5 + 0.5;
-        let color = ACCENT_A.lerp_to_gamma(ACCENT_B, phase);
-        painter.text(
-            pos2(x + w / 2.0, center.y),
-            Align2::CENTER_CENTER,
-            c,
-            font_id.clone(),
-            color,
-        );
+        let gradient = ((i as f32 / n) + t * 0.15).sin() * 0.5 + 0.5;
+        let color = ACCENT_A.lerp_to_gamma(ACCENT_B, gradient);
+        // Each letter hops a little after the previous one.
+        let hop = if reduce || !beat.live {
+            0.0
+        } else {
+            let local = phase - i as f32 * 0.04;
+            if (0.0..0.3).contains(&local) {
+                (local / 0.3 * std::f32::consts::PI).sin() * 10.0
+            } else {
+                0.0
+            }
+        };
+        let pos = pos2(x + w / 2.0, center.y - hop);
+        if hop > 1.0 {
+            crate::ui::notefield::radial_light(painter, pos, w, color, 0.25 * hop / 10.0);
+        }
+        painter.text(pos, Align2::CENTER_CENTER, c, font_id.clone(), color);
         x += w;
     }
 }
