@@ -20,7 +20,26 @@ covered by `cargo test`. The UI is egui (immediate mode) on wgpu.
 | `library` | scan `Songs/`, notify hot-reload, scores, test song | egui `Context` for repaints |
 | `config` | `Settings` (TOML), config/data folders | no |
 | `ui` | theme tokens, widgets, animation helpers, notefield drawing, gameplay HUD/stage (`hud`), screens | yes |
-| `app` | screen state machine, shared state, transitions, drops, autosave | yes |
+| `ui::gift` | private-build welcome letter + greeting videos (empty in public builds) | yes |
+| `app` | screen state machine, shared state, transitions, autosave; `quit` dialog, `shell` (menu sounds, cursor, dropped files, FPS log) | yes |
+
+### UI file layout
+
+Large screens are folders: `mod.rs` holds the state, input handling and
+`ui()`; drawing and secondary flows live in child modules that add more
+`impl` blocks to the same struct (children see the parent's private items
+through `use super::*`).
+
+| Folder | Children |
+|---|---|
+| `ui/screens/song_select` | `view` (list, details, empty/skeleton), `delete` (confirm + delayed removal) |
+| `ui/screens/import` | `view` (drop zone, running stepper), `results` (done, failed, batch summary) |
+| `ui/screens/settings` | `controls`, `folders`, `sections` (gameplay, audio, display) |
+| `ui/screens/gameplay` | `view` (stage, notes, judgment/combo, HUD, pause menu) |
+| `ui/screens/tutorial` | `course` (the wait-for-the-player engine), `lessons` (melody + lesson data) |
+| `ui/hud` | `stage`, `islands` (song/score/life/hit meter), `countdown` |
+| `ui/widgets` | `paint`, `text`, `controls` (re-exported, so `widgets::x` paths stay) |
+| `ui/gift` | `letter`, `decoder` (frame pack + JPEG thread), `greetings` |
 
 ## Threads
 

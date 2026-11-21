@@ -226,3 +226,11 @@ Di sesi Wayland, zona impor otomatis berganti teks "Klik untuk memilih file" (di
 - Terompet diganti versi FLAC baru; hening 0,83 s di awal dipotong saat build (`convert_audio(.., trim_start)`) agar loop menyambung. Loop terverifikasi (kembali ke 0 setelah ±21,5 s); berhenti hanya saat tombol "Ayo main".
 - **Ukuran jalur** (Pengaturan → Tampilan): Otomatis / Normal / Besar / Sangat besar (1,0 / 1,25 / 1,5; Otomatis = 1,3 saat dance mat terhubung). Panah, judgment, combo, hit meter ikut membesar; kecepatan scroll memakai ukuran dasar (`Layout::base_arrow`) sehingga waktu baca tetap sama. Di jendela kecil jalur dibatasi agar tidak menabrak kartu HUD (`Layout::limit_width`).
 - Belum diuji: tampilan di TV sungguhan; baris pengaturan baru belum dilihat lewat screenshot.
+
+## Sesi 2026-11-21 (lanjutan) — refactor struktur (tanpa mengubah perilaku)
+- File UI besar dipecah menjadi folder modul (lihat tabel "UI file layout" di `docs/ARCHITECTURE.md`): song_select, import, settings, gameplay, hud, widgets, app. Tidak ada file > 660 baris lagi.
+- Fitur kado (surat + video) dikumpulkan di `ui/gift/`; tutorial pindah ke `ui/screens/tutorial/` (engine `course` + data `lessons`).
+- `truncate` pindah ke `widgets` (dipakai 3 layar). Semua `#[allow]` punya alasan.
+- Verifikasi: skrip pembanding baris kode sebelum/sesudah (hanya beda visibilitas, path, format rustfmt), clippy bersih, semua test lulus, smoke test 6 layar.
+- Ditunda: modul teks UI terpusat untuk terjemahan (±520 teks); lihat catatan sesi untuk alasannya.
+- Catatan desain: modul induk memegang `use` yang dipakai anak-anaknya (pola `use super::*`). Rapi bila nanti tiap anak mengimpor sendiri.
