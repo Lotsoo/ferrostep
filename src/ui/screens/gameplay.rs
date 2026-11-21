@@ -778,7 +778,7 @@ impl GameplayScreen {
         painter.text(
             card.center_top() + vec2(0.0, 74.0),
             Align2::CENTER_CENTER,
-            super::song_select::truncate(&self.title, 34),
+            widgets::truncate(&self.title, 34),
             font_bold(theme::TEXT_M),
             palette.text,
         );

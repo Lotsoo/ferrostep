@@ -296,7 +296,7 @@ impl TitleScreen {
             painter.text(
                 pos2(eq.right() + 10.0, eq.center().y),
                 Align2::LEFT_CENTER,
-                super::song_select::truncate(&m.label, 50),
+                widgets::truncate(&m.label, 50),
                 font_bold(theme::TEXT_XS),
                 palette.text,
             );

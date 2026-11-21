@@ -844,3 +844,14 @@ pub fn page_dots(
         x += w + GAP;
     }
 }
+
+/// Shortens text to `max` characters with an ellipsis.
+pub fn truncate(text: &str, max: usize) -> String {
+    if text.chars().count() <= max {
+        text.to_string()
+    } else {
+        let mut s: String = text.chars().take(max.saturating_sub(1)).collect();
+        s.push('…');
+        s
+    }
+}
