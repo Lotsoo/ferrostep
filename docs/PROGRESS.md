@@ -192,3 +192,13 @@ Di sesi Wayland, zona impor otomatis berganti teks "Klik untuk memilih file" (di
 - Gameplay: highway + equalizer hanya di sisi kiri/kanan jalur, makin hidup seiring combo.
 - Suara atas/bawah/kesulitan: satu nada pendek dengan "instrumen" yang sama seperti Enter/Esc (yang disukai pengguna).
 - Berikutnya: minta pendapat pengguna; ide lanjutan: transisi layar "swoosh" berirama, efek hit yang lebih besar di combo milestone.
+
+## Sesi 2026-11-21 — redesign ritme bagian 2 (semua layar)
+- Impor: zona drop dengan panah jatuh bergiliran + bingkai neon berdenyut; garis pemindai di waveform; setelah selesai lagu langsung diputar sebagai preview, angka BPM + metronom + equalizer berdenyut tepat mengikuti BPM terdeteksi (preview diulang otomatis saat ÷2/×2).
+- Jeda: kartu baru (garis 4 warna, progres lagu, akurasi & combo live) + hitung mundur 3-2-1 sebelum lagu dilanjutkan (jeda dari mana pun membatalkan hitungan).
+- Pengaturan: warna & ikon panah per kategori, lantai neon kalem. Kalibrasi: strip "cepat ← → lambat" dengan penilaian tiap ketukan (umpan balik setelah tekan, bukan isyarat — supaya hasil kalibrasi tidak bias).
+- Wizard dance mat: not jatuh ke panah yang diminta, ledakan cahaya + suara saat tertangkap/diinjak, lantai berwarna sesuai panah.
+- Onboarding: indikator langkah berupa jalur not, panah menyala bergiliran.
+- Gameplay: gelombang 4 warna + percikan tiap combo kelipatan 50, suara di kelipatan 100.
+- Transisi layar: 4 garis cahaya warna kolom melesat searah perpindahan (durasi tetap, tanpa menunggu ketukan).
+- Catatan teknis: XTest tidak sampai ke jendela XWayland di KDE, jadi uji visual jeda/kalibrasi/wizard memakai patch sementara yang tidak di-commit.

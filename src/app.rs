@@ -665,6 +665,9 @@ impl eframe::App for FerrostepApp {
                     ((1.0 - e) * 255.0) as u8,
                 ),
             );
+            if !reduce {
+                draw_transition_streaks(ui.painter(), full, e, self.transition_dir);
+            }
             ctx.request_repaint();
         }
 
@@ -719,5 +722,50 @@ fn sfx_for(action: MenuAction) -> Sfx {
         MenuAction::Right => Sfx::ChangeRight,
         MenuAction::Confirm => Sfx::Confirm,
         MenuAction::Back => Sfx::Back,
+    }
+}
+
+/// Four light streaks in the arrow colors that fly across the screen during a
+/// screen change, in the direction of travel (no extra delay: they ride the
+/// same spring as the slide).
+fn draw_transition_streaks(painter: &egui::Painter, full: egui::Rect, e: f32, dir: f32) {
+    for c in 0..4u8 {
+        let p = ((e - f32::from(c) * 0.07) / 0.75).clamp(0.0, 1.0);
+        if p <= 0.0 || p >= 1.0 {
+            continue;
+        }
+        let travel = anim::ease_out_cubic(p);
+        // Enter from the side the new screen comes from.
+        let x = if dir > 0.0 {
+            full.right() - travel * (full.width() + 120.0)
+        } else {
+            full.left() + travel * (full.width() + 120.0)
+        };
+        let color = theme::column_color(c);
+        let alpha = (1.0 - p) * 0.8;
+        let streak = egui::Rect::from_min_max(
+            egui::pos2(x, full.top()),
+            egui::pos2(x + 120.0 * dir.signum(), full.bottom()),
+        );
+        let streak =
+            egui::Rect::from_min_max(streak.min.min(streak.max), streak.min.max(streak.max));
+        let (left, right) = if dir > 0.0 {
+            (color.gamma_multiply(alpha), Color32::TRANSPARENT)
+        } else {
+            (Color32::TRANSPARENT, color.gamma_multiply(alpha))
+        };
+        widgets::gradient_rect(painter, streak, left, right);
+        let edge = if dir > 0.0 {
+            streak.left()
+        } else {
+            streak.right()
+        };
+        painter.line_segment(
+            [
+                egui::pos2(edge, full.top()),
+                egui::pos2(edge, full.bottom()),
+            ],
+            egui::Stroke::new(2.0, Color32::WHITE.gamma_multiply(alpha)),
+        );
     }
 }
