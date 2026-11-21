@@ -149,9 +149,47 @@ pub struct Stage<'a> {
     /// Seconds, for slow ambient motion.
     pub time: f32,
     pub reduce: bool,
+    /// Song beat (negative during the lead-in).
+    pub beat: f64,
 }
 
 /// Background, ambient light and drifting particles.
+/// Neon highway and equalizers beside the notefield (never behind it, so
+/// arrows stay easy to read). They grow livelier with the combo.
+fn draw_side_stage(painter: &Painter, s: &Stage, light: f32) {
+    let beat = super::beatfx::Beat::at(s.beat, 120.0, s.beat >= 0.0);
+    let field = Rect::from_min_max(
+        pos2(s.layout.left - 24.0, s.rect.top()),
+        pos2(
+            s.layout.left + s.layout.width(s.columns) + 24.0,
+            s.rect.bottom(),
+        ),
+    );
+    let tint = s.tint.gamma_multiply(light * (0.55 + 0.45 * s.energy));
+    for side in [
+        Rect::from_min_max(s.rect.min, pos2(field.left(), s.rect.bottom())),
+        Rect::from_min_max(pos2(field.right(), s.rect.top()), s.rect.max),
+    ] {
+        if side.width() < 40.0 {
+            continue;
+        }
+        super::beatfx::draw_highway(&painter.with_clip_rect(side), s.rect, tint, &beat);
+        let eq = Rect::from_min_max(
+            pos2(side.left() + 24.0, side.bottom() - 40.0 - 50.0 * s.energy),
+            pos2(side.right() - 24.0, side.bottom() - 12.0),
+        );
+        super::beatfx::draw_equalizer(
+            painter,
+            eq,
+            (
+                s.tint.gamma_multiply(0.5 * light),
+                ACCENT_B.gamma_multiply(0.5 * light),
+            ),
+            &beat,
+        );
+    }
+}
+
 pub fn draw_stage(painter: &Painter, s: &Stage) {
     let rect = s.rect;
     widgets::vertical_gradient(
@@ -191,6 +229,7 @@ pub fn draw_stage(painter: &Painter, s: &Stage) {
 
     if !s.reduce {
         draw_particles(painter, s);
+        draw_side_stage(painter, s, light);
     }
 
     // Cinematic vignette: darker edges pull the eye to the notefield.

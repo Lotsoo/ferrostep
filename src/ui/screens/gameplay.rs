@@ -380,6 +380,7 @@ impl GameplayScreen {
             pulse,
             time,
             reduce,
+            beat,
         };
         let scroll = Scroll::new(&shared.settings, &layout, &self.timing, self.song_time);
         hud::draw_stage(&painter, &stage);

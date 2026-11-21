@@ -39,7 +39,8 @@ impl Beat {
         b
     }
 
-    fn at(beat: f64, bpm: f32, live: bool) -> Self {
+    /// Beat from an already-known beat number (gameplay has its own timing).
+    pub fn at(beat: f64, bpm: f32, live: bool) -> Self {
         let phase = beat.rem_euclid(1.0) as f32;
         // Sharp attack, quick decay: reads as a "kick".
         let pulse = if beat < 0.0 {

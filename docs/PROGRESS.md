@@ -182,3 +182,13 @@ Di sesi Wayland, zona impor otomatis berganti teks "Klik untuk memilih file" (di
 ## Sesi 2026-11-21 (lanjutan, belum di-commit)
 - Selesai: hold-to-repeat menu (keyboard & mat), efek suara arcade baru (stereo, reverb, saturasi; volume efek tidak ikut volume musik), hitung mundur 5 detik (kartu BERSIAP → 3-2-1 dengan flash/shockwave + suara → MULAI!), dialog konfirmasi keluar, badge grade berwarna, petunjuk tombol tebal, impor duplikat dilewati (hash, byte, fingerprint chart).
 - Berikutnya: pengguna menilai suara baru; update ARCHITECTURE/README; commit batch ini; screenshot dialog keluar.
+
+## Sesi 2026-11-21 — redesign "rasa rhythm game" (tetap Rust/egui)
+- Pengguna memilih tetap di egui (bukan Tauri + React) setelah penjelasan soal FPS WebKitGTK & biaya tulis ulang.
+- Modul baru `ui/beatfx.rs`: `Beat` (pulse/downbeat dari timing lagu), `draw_highway` (lantai neon perspektif, satu garis per ketukan), `draw_equalizer` (bar ala spektrum, mengikuti ketukan), `draw_metronome`, `draw_kick_ring`.
+- Pilih Lagu: highway, equalizer di banner, metronom di BPM, kartu terpilih berdenyut — sinkron dengan preview.
+- Judul: logo yang hurufnya melompat bergelombang, 4 panah menyala bergiliran, equalizer, bingkai menu berdenyut, label "sedang diputar".
+- Hasil: drum roll → grade menghantam (kilatan + gelombang kejut + suara) → stempel FULL COMBO / REKOR BARU!; angka judgment menghitung naik.
+- Gameplay: highway + equalizer hanya di sisi kiri/kanan jalur, makin hidup seiring combo.
+- Suara atas/bawah/kesulitan: satu nada pendek dengan "instrumen" yang sama seperti Enter/Esc (yang disukai pengguna).
+- Berikutnya: minta pendapat pengguna; ide lanjutan: transisi layar "swoosh" berirama, efek hit yang lebih besar di combo milestone.
