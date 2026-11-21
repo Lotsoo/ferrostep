@@ -40,6 +40,9 @@ const LEAD_IN: f32 = 0.6;
 /// The audio position not moving for this long (seconds) means the audio
 /// device is stuck; the video then keeps going on the system clock.
 const AUDIO_STALL: f32 = 0.5;
+/// Longest wait (seconds) for the decoder thread before the UI decodes the
+/// frame itself.
+const DECODER_PATIENCE: f32 = 0.25;
 /// Pause on the last frame before the next video.
 const HOLD_END: f32 = 1.0;
 
@@ -90,7 +93,16 @@ impl FramePack {
     }
 }
 
+/// Decodes one frame; a broken frame (even a decoder panic) gives `None`
+/// instead of killing the decoder thread.
 fn decode_jpeg(bytes: &[u8]) -> Option<ColorImage> {
+    std::panic::catch_unwind(|| decode_jpeg_inner(bytes)).unwrap_or_else(|_| {
+        log::warn!("gift video frame: decoder panicked");
+        None
+    })
+}
+
+fn decode_jpeg_inner(bytes: &[u8]) -> Option<ColorImage> {
     let options = DecoderOptions::default().jpeg_set_out_colorspace(ColorSpace::RGBA);
     let mut decoder = JpegDecoder::new_with_options(ZCursor::new(bytes), options);
     let pixels = decoder
@@ -143,13 +155,14 @@ impl FrameDecoder {
         }
     }
 
-    /// Newest decoded frame at or before `want`, if a new one is ready.
-    fn take(&mut self, want: usize) -> Option<ColorImage> {
+    /// Newest decoded frame (index, image) at or before `want`, if a new one
+    /// is ready.
+    fn take(&mut self, want: usize) -> Option<(usize, ColorImage)> {
         self.wanted.store(want, Ordering::Relaxed);
         let mut newest = None;
         while let Some((i, image)) = self.pending.take().or_else(|| self.rx.try_recv().ok()) {
             if i <= want {
-                newest = Some(image);
+                newest = Some((i, image));
             } else {
                 self.pending = Some((i, image));
                 break;
@@ -173,6 +186,13 @@ pub struct Greetings {
     fallback: Option<(Instant, f64)>,
     texture: Option<TextureHandle>,
     decoder: FrameDecoder,
+    /// Frame on screen and when it was uploaded (watchdog for a starved
+    /// decoder thread).
+    shown_frame: Option<usize>,
+    last_upload: Instant,
+    /// The decoder thread fell behind once in this video: the UI decodes
+    /// every frame itself from now on (about 5 ms per frame).
+    decode_here: bool,
     ended_at: Option<Instant>,
     opened: Instant,
     nudged: Option<Instant>,
@@ -196,6 +216,9 @@ impl Greetings {
             last_raw: (0.0, now),
             fallback: None,
             texture: None,
+            shown_frame: None,
+            last_upload: now,
+            decode_here: false,
             ended_at: None,
             opened: now,
             nudged: None,
@@ -278,13 +301,41 @@ impl Greetings {
             self.clock = None;
             self.fallback = None;
             self.decoder = FrameDecoder::start(self.videos[self.index].1);
+            self.shown_frame = None;
+            self.last_upload = now;
+            self.decode_here = false;
+            // Show the new video's first frame right away: the previous
+            // video's last frame must never sit under the new title.
+            if let (Some(tex), Some(image)) = (
+                &mut self.texture,
+                self.videos[self.index].1.frame(0).and_then(decode_jpeg),
+            ) {
+                tex.set(image, TextureOptions::LINEAR);
+                self.shown_frame = Some(0);
+            }
             self.ended_at = None;
         }
 
         // Upload the frame for the current time.
         let pack = &self.videos[self.index].1;
         let frame = ((t.max(0.0) * pack.fps) as usize).min(pack.count - 1);
-        if let Some(image) = self.decoder.take(frame) {
+        let ready = self.decoder.take(frame);
+        // Watchdog: if the decoder thread gets no CPU time (a busy machine),
+        // decode the needed frame here so the picture never freezes.
+        let behind = self.shown_frame != Some(frame);
+        if behind && !self.decode_here && anim::since(self.last_upload, now) > DECODER_PATIENCE {
+            log::warn!("gift video decoder fell behind; decoding on the UI thread");
+            self.decode_here = true;
+        }
+        let image = match ready {
+            Some(found) => Some(found),
+            None if behind && self.decode_here => pack
+                .frame(frame)
+                .and_then(decode_jpeg)
+                .map(|img| (frame, img)),
+            None => None,
+        };
+        if let Some((index, image)) = image {
             match &mut self.texture {
                 Some(tex) => tex.set(image, TextureOptions::LINEAR),
                 None => {
@@ -292,6 +343,8 @@ impl Greetings {
                         Some(ctx.load_texture("gift-video", image, TextureOptions::LINEAR))
                 }
             }
+            self.shown_frame = Some(index);
+            self.last_upload = now;
         }
         let progress = (t / duration).clamp(0.0, 1.0) as f32;
         let remaining = (duration - t.max(0.0)).max(0.0);
