@@ -47,7 +47,7 @@ VIAddVersionKey /LANG=0 "LegalCopyright" "MIT License"
 !define MUI_UNICON "${ROOT}/assets/icons/ferrostep.ico"
 !define MUI_ABORTWARNING
 !define MUI_WELCOMEPAGE_TITLE "Selamat datang di ${APP}"
-!define MUI_WELCOMEPAGE_TEXT "Ferrostep adalah game ritme 4 panah untuk keyboard dan dance mat.$\r$\n$\r$\nKlik Lanjut untuk memasang. Tidak perlu hak administrator."
+!define MUI_WELCOMEPAGE_TEXT "Ferrostep adalah game ritme 4 panah untuk keyboard dan dance mat.$\r$\n$\r$\nInstaller akan memasang Ferrostep untuk akun Windows-mu saja (tanpa hak administrator) dan membuat pintasan di Desktop serta menu Start. Hapus kapan saja lewat Settings > Apps."
 !define MUI_FINISHPAGE_RUN "$INSTDIR\ferrostep.exe"
 !define MUI_FINISHPAGE_RUN_TEXT "Mainkan ${APP} sekarang"
 

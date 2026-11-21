@@ -53,6 +53,43 @@ jobs:
       - run: cargo clippy --all-targets -- -D warnings
       - run: cargo test
       - run: cargo build --release
+
+      # ── Code signing (SignPath Foundation) ─────────────────────────────
+      # Runs only for release tags, and only once the SignPath project is set
+      # up (repository variable SIGNPATH_ORGANIZATION_ID + secret
+      # SIGNPATH_API_TOKEN). Every request needs manual approval in SignPath.
+      # See docs/SIGNING.md.
+      - name: Decide whether to sign
+        id: signing
+        shell: pwsh
+        run: |
+          $enabled = "${{ startsWith(github.ref, 'refs/tags/v') && vars.SIGNPATH_ORGANIZATION_ID != '' }}"
+          "enabled=$enabled" >> $env:GITHUB_OUTPUT
+      - name: Upload unsigned exe
+        if: steps.signing.outputs.enabled == 'true'
+        id: unsigned-exe
+        uses: actions/upload-artifact@v4
+        with:
+          name: unsigned-exe
+          path: target/release/ferrostep.exe
+      - name: Sign exe
+        if: steps.signing.outputs.enabled == 'true'
+        uses: signpath/github-action-submit-signing-request@v3
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ferrostep
+          signing-policy-slug: release-signing
+          artifact-configuration-slug: exe
+          github-artifact-id: ${{ steps.unsigned-exe.outputs.artifact-id }}
+          wait-for-completion: true
+          wait-for-completion-timeout-in-seconds: 3600
+          output-artifact-directory: signed-exe
+      - name: Use signed exe
+        if: steps.signing.outputs.enabled == 'true'
+        shell: pwsh
+        run: Copy-Item signed-exe/ferrostep.exe target/release/ferrostep.exe -Force
+
       - name: Package zip
         shell: pwsh
         run: |
@@ -74,6 +111,30 @@ jobs:
           choco install nsis -y --no-progress
           $version = (Select-String -Path Cargo.toml -Pattern '^version = "(.+)"').Matches[0].Groups[1].Value
           & "${env:ProgramFiles(x86)}\NSIS\makensis.exe" -V2 "-DVERSION=$version" "-DEXE=../../target/release/ferrostep.exe" packaging/windows/ferrostep.nsi
+      - name: Upload unsigned installer
+        if: steps.signing.outputs.enabled == 'true'
+        id: unsigned-installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: unsigned-installer
+          path: dist/Ferrostep-Setup-*.exe
+      - name: Sign installer
+        if: steps.signing.outputs.enabled == 'true'
+        uses: signpath/github-action-submit-signing-request@v3
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ferrostep
+          signing-policy-slug: release-signing
+          artifact-configuration-slug: installer
+          github-artifact-id: ${{ steps.unsigned-installer.outputs.artifact-id }}
+          wait-for-completion: true
+          wait-for-completion-timeout-in-seconds: 3600
+          output-artifact-directory: signed-installer
+      - name: Use signed installer
+        if: steps.signing.outputs.enabled == 'true'
+        shell: pwsh
+        run: Copy-Item signed-installer/*.exe dist/ -Force
       - uses: actions/upload-artifact@v4
         with:
           name: ferrostep-windows-installer

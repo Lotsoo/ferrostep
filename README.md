@@ -132,6 +132,25 @@ Push tag `v*` (mis. `v0.1.0`) membuat GitHub Release otomatis.
 
 ---
 
+## Code signing policy
+
+Rilis Windows (`ferrostep.exe` dan installer `Ferrostep-Setup-*.exe`) ditandatangani digital supaya Windows tidak menampilkan peringatan "Windows protected your PC".
+
+Free code signing provided by [SignPath.io](https://about.signpath.io), certificate by [SignPath Foundation](https://signpath.org).
+
+- Every signed binary is built from this repository's source code by GitHub Actions on GitHub-hosted runners ([`.github/workflows/build.yml`](.github/workflows/build.yml)); nothing is signed from a local machine.
+- Only release tags (`v*`) are signed, and every signing request is manually approved.
+- Team roles:
+  - Committers and reviewers: [GITHUB_USERNAME](https://github.com/GITHUB_USERNAME)
+  - Approvers: [GITHUB_USERNAME](https://github.com/GITHUB_USERNAME)
+- All team members use multi-factor authentication on GitHub and SignPath.
+
+## Privasi (Privacy policy)
+
+Ferrostep **tidak mengirim data apa pun** ke internet: tidak ada telemetri, akun, iklan, atau pembaruan otomatis. Pengaturan, skor, dan lagu disimpan hanya di komputermu.
+
+*This program will not transfer any information to other networked systems unless specifically requested by the user or the person installing or operating it.*
+
 ## Lisensi
 
 Kode: MIT (lihat [`LICENSE`](LICENSE)). Font Inter: SIL Open Font License (`assets/fonts/LICENSE-Inter.txt`).
