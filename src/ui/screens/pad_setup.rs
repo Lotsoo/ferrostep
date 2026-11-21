@@ -2,16 +2,17 @@
 
 use std::time::Instant;
 
-use eframe::egui::{Align2, Color32, Rect, Ui, pos2, vec2};
+use eframe::egui::{Align2, Color32, Rect, Stroke, Ui, pos2, vec2};
 
 use super::Nav;
 use crate::app::Shared;
+use crate::audio::Sfx;
 use crate::input::gamepad::PadEvent;
 use crate::input::profiles::{DeviceProfile, RawInput};
 use crate::input::{Device, FrameInput, MenuAction};
 use crate::ui::notefield::{draw_arrow, draw_glow};
 use crate::ui::theme::{self, column_color, font, font_bold};
-use crate::ui::{anim, widgets};
+use crate::ui::{anim, beatfx, widgets};
 
 const STEPS: [&str; 6] = ["KIRI", "BAWAH", "ATAS", "KANAN", "START", "SELECT / BACK"];
 /// Ignore presses this soon after a capture (mats can chatter).
@@ -25,6 +26,8 @@ pub struct PadSetupScreen {
     last_capture: Instant,
     opened: Instant,
     pressed: [bool; 4],
+    /// Last time each panel was stepped on / captured (for the hit burst).
+    hit_at: [Option<Instant>; 4],
     back_to_settings: bool,
 }
 
@@ -41,6 +44,7 @@ impl PadSetupScreen {
             last_capture: Instant::now(),
             opened: Instant::now(),
             pressed: [false; 4],
+            hit_at: [None; 4],
             back_to_settings,
         }
     }
@@ -68,18 +72,23 @@ impl PadSetupScreen {
             return;
         }
         match self.step {
-            0..=3 => self.profile.columns[self.step].push(raw),
+            0..=3 => {
+                self.profile.columns[self.step].push(raw);
+                self.hit_at[self.step] = Some(now);
+            }
             4 => self.profile.start.push(raw),
             5 => self.profile.back.push(raw),
             _ => return,
         }
         self.last_capture = now;
+        shared.sfx(Sfx::Confirm);
         self.advance(shared);
     }
 
     fn advance(&mut self, shared: &mut Shared) {
         self.step += 1;
         if self.done() {
+            shared.sfx(Sfx::Success);
             shared.save_pad_profile = Some((self.key.clone(), self.profile.clone()));
             shared
                 .toasts
@@ -100,7 +109,11 @@ impl PadSetupScreen {
         }
         for ev in &input.columns {
             if ev.device == Device::Gamepad && usize::from(ev.column) < 4 {
-                self.pressed[usize::from(ev.column)] = ev.pressed;
+                let c = usize::from(ev.column);
+                self.pressed[c] = ev.pressed;
+                if ev.pressed && self.done() {
+                    self.hit_at[c] = Some(ev.at);
+                }
             }
         }
         // Only the keyboard Esc leaves the wizard (mat buttons are being mapped).
@@ -111,6 +124,19 @@ impl PadSetupScreen {
         let rect = ui.max_rect();
         let palette = shared.palette;
         let painter = ui.painter().clone();
+        let reduce = shared.settings.reduce_motion;
+        let t = anim::since(self.opened, now);
+        if palette.dark {
+            // Floor glows in the color of the arrow being asked for.
+            let tint = column_color(self.step.min(3) as u8);
+            let beat = beatfx::Beat::idle(t);
+            beatfx::draw_highway(
+                &painter,
+                rect,
+                tint,
+                &if reduce { beat.calm() } else { beat },
+            );
+        }
         let card = Rect::from_center_size(rect.center(), vec2(720.0, 520.0));
         widgets::card(&painter, card, &palette);
         widgets::text_tracked(
@@ -170,6 +196,39 @@ impl PadSetupScreen {
                 fill,
                 eframe::egui::Stroke::new(3.0, stroke_color),
             );
+            // A note falling onto the arrow being asked for: "step here".
+            if active && !reduce {
+                let p = (t * 0.9).rem_euclid(1.0);
+                let e = anim::ease_out_cubic(p);
+                let y = center.y - 64.0 * (1.0 - e);
+                draw_arrow(
+                    &painter,
+                    pos2(center.x, y),
+                    size * 0.8,
+                    c,
+                    color.gamma_multiply(0.6 * (1.0 - p * 0.5)),
+                    Stroke::new(1.5, Color32::WHITE.gamma_multiply(0.5 * (1.0 - p))),
+                );
+            }
+            // Hit burst when captured or stepped on.
+            if let Some(at) = self.hit_at[ci] {
+                let age = anim::since(at, now);
+                if age < 0.5 && !reduce {
+                    let e = anim::ease_out_cubic(age / 0.5);
+                    painter.circle_stroke(
+                        center,
+                        size * (0.5 + 0.6 * e),
+                        Stroke::new(5.0 * (1.0 - e), color.gamma_multiply(1.0 - e)),
+                    );
+                    crate::ui::notefield::radial_light(
+                        &painter,
+                        center,
+                        size,
+                        color,
+                        0.8 * (1.0 - e),
+                    );
+                }
+            }
         }
 
         let (title, hint) = if self.done() {
